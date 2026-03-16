@@ -1,0 +1,159 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "hash",
+ "creation": "2026-03-16 12:56:38.018687",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "messagesid",
+  "messagetype",
+  "apiversion",
+  "smsmessagesid",
+  "mediaurl0",
+  "nummedia",
+  "column_break_xjlz",
+  "profilename",
+  "accountsid",
+  "from",
+  "to",
+  "mediacontenttype0",
+  "pdf",
+  "section_break_tekw",
+  "body",
+  "column_break_qxet",
+  "channelmetadata"
+ ],
+ "fields": [
+  {
+   "fieldname": "messagesid",
+   "fieldtype": "Data",
+   "label": "MessageSid",
+   "read_only": 1
+  },
+  {
+   "fieldname": "messagetype",
+   "fieldtype": "Data",
+   "label": "MessageType",
+   "read_only": 1
+  },
+  {
+   "fieldname": "accountsid",
+   "fieldtype": "Data",
+   "label": "AccountSid",
+   "read_only": 1
+  },
+  {
+   "fieldname": "apiversion",
+   "fieldtype": "Data",
+   "label": "ApiVersion",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_xjlz",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "from",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "From",
+   "read_only": 1
+  },
+  {
+   "fieldname": "to",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "To",
+   "read_only": 1
+  },
+  {
+   "fieldname": "mediacontenttype0",
+   "fieldtype": "Data",
+   "label": "MediaContentType0",
+   "read_only": 1
+  },
+  {
+   "fieldname": "mediaurl0",
+   "fieldtype": "Small Text",
+   "label": "MediaUrl0",
+   "read_only": 1
+  },
+  {
+   "fieldname": "nummedia",
+   "fieldtype": "Data",
+   "label": "NumMedia",
+   "read_only": 1
+  },
+  {
+   "fieldname": "profilename",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "ProfileName",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_tekw",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "body",
+   "fieldtype": "Small Text",
+   "label": "Body",
+   "read_only": 1
+  },
+  {
+   "fieldname": "smsmessagesid",
+   "fieldtype": "Data",
+   "label": "SmsMessageSid",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_qxet",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "channelmetadata",
+   "fieldtype": "Small Text",
+   "label": "ChannelMetadata",
+   "read_only": 1
+  },
+  {
+   "fieldname": "pdf",
+   "fieldtype": "Attach",
+   "label": "pdf",
+   "read_only": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-03-16 14:24:00.658938",
+ "modified_by": "Administrator",
+ "module": "Satees",
+ "name": "Twilio Whatsapp Message Log",
+ "naming_rule": "Random",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}
