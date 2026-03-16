@@ -6,6 +6,7 @@
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
+  "from",
   "messagesid",
   "messagetype",
   "apiversion",
@@ -13,10 +14,9 @@
   "mediaurl0",
   "nummedia",
   "column_break_xjlz",
+  "to",
   "profilename",
   "accountsid",
-  "from",
-  "to",
   "mediacontenttype0",
   "pdf",
   "section_break_tekw",
@@ -34,18 +34,21 @@
   {
    "fieldname": "messagetype",
    "fieldtype": "Data",
+   "hidden": 1,
    "label": "MessageType",
    "read_only": 1
   },
   {
    "fieldname": "accountsid",
    "fieldtype": "Data",
+   "hidden": 1,
    "label": "AccountSid",
    "read_only": 1
   },
   {
    "fieldname": "apiversion",
    "fieldtype": "Data",
+   "hidden": 1,
    "label": "ApiVersion",
    "read_only": 1
   },
@@ -72,12 +75,14 @@
   {
    "fieldname": "mediacontenttype0",
    "fieldtype": "Data",
+   "hidden": 1,
    "label": "MediaContentType0",
    "read_only": 1
   },
   {
    "fieldname": "mediaurl0",
    "fieldtype": "Small Text",
+   "hidden": 1,
    "label": "MediaUrl0",
    "read_only": 1
   },
@@ -108,6 +113,7 @@
   {
    "fieldname": "smsmessagesid",
    "fieldtype": "Data",
+   "hidden": 1,
    "label": "SmsMessageSid",
    "read_only": 1
   },
@@ -118,6 +124,7 @@
   {
    "fieldname": "channelmetadata",
    "fieldtype": "Small Text",
+   "hidden": 1,
    "label": "ChannelMetadata",
    "read_only": 1
   },
@@ -131,7 +138,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-03-16 14:24:00.658938",
+ "modified": "2026-03-16 14:51:05.333478",
  "modified_by": "Administrator",
  "module": "Satees",
  "name": "Twilio Whatsapp Message Log",
