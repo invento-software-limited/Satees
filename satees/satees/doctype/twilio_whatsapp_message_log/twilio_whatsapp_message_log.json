@@ -131,14 +131,13 @@
   {
    "fieldname": "pdf",
    "fieldtype": "Attach",
-   "label": "pdf",
-   "read_only": 1
+   "label": "pdf"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-03-16 14:51:05.333478",
+ "modified": "2026-03-19 01:56:34.339294",
  "modified_by": "Administrator",
  "module": "Satees",
  "name": "Twilio Whatsapp Message Log",
