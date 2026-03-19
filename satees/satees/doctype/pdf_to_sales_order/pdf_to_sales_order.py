@@ -81,7 +81,6 @@ class PdfToSalesOrder(Document):
 			if len(extracted_orders) > 0:
 				for i in extracted_orders:
 					if len(i.get("items")) > 0:
-						print(i, datetime.strptime(date_time.group(), "%d/%m/%y %I:%M %p") )
 						so = frappe.new_doc("Sales Order")
 						so.name = i.get("so_no")
 						so.transaction_date = datetime.strptime(date_time.group(), "%d/%m/%y %I:%M %p").date()
@@ -89,7 +88,6 @@ class PdfToSalesOrder(Document):
 						for item in i.get("items"):
 							delivery_date = datetime.strptime(item.get("delivery_date"), "%d/%m/%y").date()
 
-							print(item, delivery_date)
 							so.append("items", {
 								"item_code": item.get("item_code"),
 								"qty": float(item.get("qty")),
@@ -97,13 +95,12 @@ class PdfToSalesOrder(Document):
 								"warehouse": item.get("warehouse")
 							})
 						so.insert(ignore_permissions=True)
+						frappe.db.commit()
 
 		except Exception as e:
 			frappe.log_error(message=frappe.get_traceback(), title="PDF Processing Error")
 			return {"status": "error", "message": str(e)}
 
-
-	
 
 
 	@frappe.whitelist()
@@ -262,35 +259,18 @@ def handle_so_after_item(
 	item_row JSON fields: item_code, qty, delivery_date, warehouse
 	"""
 	import json
-	from datetime import datetime as _dt
 
 	try:
 		row = json.loads(item_row) if isinstance(item_row, str) else item_row
 	except Exception:
 		return {"status": "error", "error": "Invalid item_row JSON"}
 
-	print("Abdul Hasib")
 
 	item_code    = row.get("item_code")
 	qty          = frappe.utils.flt(row.get("qty") or 1)
 	delivery_date = row.get("delivery_date")
 	warehouse    = row.get("warehouse") or ""
 
-	print(item_code, qty, delivery_date, warehouse, docname)
-
-
-
-	
-	# Use transaction_date if provided, else fall back to delivery_date
-	# if transaction_date:
-	# 	try:
-	# 		# Accept both YYYY-MM-DD and DD/MM/YY
-	# 		if "/" in str(transaction_date):
-	# 			transaction_date = str(_dt.strptime(transaction_date, "%d/%m/%y").date())
-	# 	except Exception:
-	# 		pass
-	# else:
-	# 	transaction_date = delivery_date
 
 	# ── Validate item ────────────────────────────────────────────────────
 	if not frappe.db.exists("Item", item_code):
@@ -304,12 +284,11 @@ def handle_so_after_item(
 
 		so_doc = frappe.get_doc("Sales Order", so_no)
 
-		print(so_doc)
 
 		# Skip if item already present
 		if item_code in [i.item_code for i in so_doc.items]:
 			return {"status": "ok", "so_exists": True, "so_no": so_no, "note": "Item already in SO"}
-		print(item_code, qty, delivery_date, warehouse)
+
 		so_doc.append("items", {
 			"item_code":     item_code,
 			"qty":           qty,
@@ -318,7 +297,7 @@ def handle_so_after_item(
 		})
 		so_doc.save(ignore_permissions=True)
 		frappe.db.commit()
-		print("Abdul ka bacca")
+		
 		return {"status": "ok", "so_exists": True, "so_no": so_no}
 
 	# ── Scenario B: SO not found → create ───────────────────────────────
