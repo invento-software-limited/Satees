@@ -1,0 +1,63 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-03-19 15:44:59.695777",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "supplier_delivery_pdf",
+  "date",
+  "section_break_eomq",
+  "item_list"
+ ],
+ "fields": [
+  {
+   "fieldname": "supplier_delivery_pdf",
+   "fieldtype": "Attach",
+   "label": "Supplier Delivery PDF"
+  },
+  {
+   "fieldname": "section_break_eomq",
+   "fieldtype": "Section Break",
+   "label": "items"
+  },
+  {
+   "fieldname": "item_list",
+   "fieldtype": "HTML",
+   "label": "item_list"
+  },
+  {
+   "default": "Today",
+   "fieldname": "date",
+   "fieldtype": "Date",
+   "label": "Date"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-03-19 15:46:58.909854",
+ "modified_by": "Administrator",
+ "module": "Satees",
+ "name": "PDF to Purchase Receipt",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}
