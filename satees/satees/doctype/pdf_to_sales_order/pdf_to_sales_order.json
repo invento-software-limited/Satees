@@ -15,7 +15,8 @@
   {
    "fieldname": "pdf",
    "fieldtype": "Attach",
-   "label": "Pdf"
+   "label": "Pdf",
+   "read_only": 1
   },
   {
    "depends_on": "pdf",
@@ -32,13 +33,14 @@
    "depends_on": "pdf",
    "fieldname": "date",
    "fieldtype": "Date",
-   "label": "Date"
+   "label": "Date",
+   "read_only": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-03-19 01:56:13.580103",
+ "modified": "2026-03-19 14:03:53.529681",
  "modified_by": "Administrator",
  "module": "Satees",
  "name": "Pdf To Sales Order",

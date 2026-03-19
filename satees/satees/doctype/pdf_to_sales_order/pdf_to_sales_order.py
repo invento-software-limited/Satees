@@ -212,8 +212,8 @@ class PdfToSalesOrder(Document):
 				# Parse delivery date safely
 				raw_date = item.get("delivery_date", "")
 				try:
-					from datetime import datetime as _dt
-					parsed_date = str(_dt.strptime(raw_date, "%d/%m/%y").date())
+					
+					parsed_date = (datetime.strptime(raw_date, "%d/%m/%y").date())
 				except Exception:
 					parsed_date = raw_date  # pass as-is if parsing fails
 
@@ -253,7 +253,7 @@ class PdfToSalesOrder(Document):
 @frappe.whitelist()
 def handle_so_after_item(
 	docname, so_no, so_exists, item_row,
-	customer_id="", customer_name="", transaction_date=""
+	customer_id="", customer_name=""
 ):
 	"""
 	Scenario A: so_exists == 1 → append item to existing Sales Order
@@ -269,21 +269,28 @@ def handle_so_after_item(
 	except Exception:
 		return {"status": "error", "error": "Invalid item_row JSON"}
 
+	print("Abdul Hasib")
+
 	item_code    = row.get("item_code")
 	qty          = frappe.utils.flt(row.get("qty") or 1)
-	delivery_date = row.get("delivery_date") or frappe.utils.today()
+	delivery_date = row.get("delivery_date")
 	warehouse    = row.get("warehouse") or ""
 
+	print(item_code, qty, delivery_date, warehouse, docname)
+
+
+
+	
 	# Use transaction_date if provided, else fall back to delivery_date
-	if transaction_date:
-		try:
-			# Accept both YYYY-MM-DD and DD/MM/YY
-			if "/" in str(transaction_date):
-				transaction_date = str(_dt.strptime(transaction_date, "%d/%m/%y").date())
-		except Exception:
-			pass
-	else:
-		transaction_date = delivery_date
+	# if transaction_date:
+	# 	try:
+	# 		# Accept both YYYY-MM-DD and DD/MM/YY
+	# 		if "/" in str(transaction_date):
+	# 			transaction_date = str(_dt.strptime(transaction_date, "%d/%m/%y").date())
+	# 	except Exception:
+	# 		pass
+	# else:
+	# 	transaction_date = delivery_date
 
 	# ── Validate item ────────────────────────────────────────────────────
 	if not frappe.db.exists("Item", item_code):
@@ -291,23 +298,27 @@ def handle_so_after_item(
 
 	# ── Scenario A: SO exists → add item ────────────────────────────────
 	if int(so_exists):
+
 		if not frappe.db.exists("Sales Order", so_no):
 			return {"status": "error", "error": f"Sales Order '{so_no}' not found"}
 
 		so_doc = frappe.get_doc("Sales Order", so_no)
 
+		print(so_doc)
+
 		# Skip if item already present
 		if item_code in [i.item_code for i in so_doc.items]:
 			return {"status": "ok", "so_exists": True, "so_no": so_no, "note": "Item already in SO"}
-
+		print(item_code, qty, delivery_date, warehouse)
 		so_doc.append("items", {
 			"item_code":     item_code,
 			"qty":           qty,
-			"delivery_date": delivery_date,
+			"delivery_date": datetime.strptime(delivery_date, "%Y-%m-%d").date(),
 			"warehouse":     warehouse,
 		})
 		so_doc.save(ignore_permissions=True)
 		frappe.db.commit()
+		print("Abdul ka bacca")
 		return {"status": "ok", "so_exists": True, "so_no": so_no}
 
 	# ── Scenario B: SO not found → create ───────────────────────────────
@@ -324,11 +335,12 @@ def handle_so_after_item(
 				"error": f"Customer '{customer_name}' not found. Please create the customer first."
 			}
 		customer_id = found[0]["name"]
-
+	
+	pdf_doc = frappe.get_doc("Pdf To Sales Order", docname)
 	new_so = frappe.get_doc({
 		"doctype":          "Sales Order",
 		"customer":         customer_id,
-		"transaction_date": transaction_date,
+		"transaction_date": pdf_doc.date,
 		"delivery_date":    delivery_date,
 		"items": [{
 			"item_code":     item_code,
