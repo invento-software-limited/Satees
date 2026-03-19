@@ -565,7 +565,7 @@ frappe.router.on("change", () => {
                             item_row:         JSON.stringify(item_row),
                             customer_id:      c.customer_id   || "",
                             customer_name:    c.customer_name || "",
-                            transaction_date: c.transaction_date || "",
+                           
                         },
                         callback(r) {
                             if (r.message && r.message.status === "ok") {
