@@ -1,26 +1,50 @@
 {
  "actions": [],
  "allow_rename": 1,
+ "autoname": ".#####",
  "creation": "2026-03-14 13:03:25.142305",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
-  "pdf"
+  "pdf",
+  "date",
+  "items_section",
+  "item_list"
  ],
  "fields": [
   {
    "fieldname": "pdf",
    "fieldtype": "Attach",
-   "label": "Pdf"
+   "label": "Pdf",
+   "read_only": 1
+  },
+  {
+   "depends_on": "pdf",
+   "fieldname": "items_section",
+   "fieldtype": "Section Break",
+   "label": "Items"
+  },
+  {
+   "fieldname": "item_list",
+   "fieldtype": "HTML",
+   "label": "Item List"
+  },
+  {
+   "depends_on": "pdf",
+   "fieldname": "date",
+   "fieldtype": "Date",
+   "label": "Date",
+   "read_only": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-03-14 13:04:31.133250",
+ "modified": "2026-03-19 14:03:53.529681",
  "modified_by": "Administrator",
  "module": "Satees",
- "name": "Whatsapp pdf",
+ "name": "Pdf To Sales Order",
+ "naming_rule": "Expression",
  "owner": "Administrator",
  "permissions": [
   {
