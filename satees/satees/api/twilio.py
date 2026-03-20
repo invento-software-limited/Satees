@@ -3,9 +3,11 @@ import frappe
 import requests
 from twilio.rest import Client
 
-TWILIO_SID = "***REMOVED***"
-TWILIO_AUTH_TOKEN = "***REMOVED***"
-TWILIO_WHATSAPP = "***REMOVED***"  # replace your live number with sandbox number
+easwari_settings = frappe.db.get_doc("Easwari Settings")
+
+TWILIO_SID = f"{easwari_settings.twilio_sid}"
+TWILIO_AUTH_TOKEN = f"{easwari_settings.twilio_auth_token}"
+TWILIO_WHATSAPP = f"whatsapp:{easwari_settings.twilio_whatsapp_number}"
 
 @frappe.whitelist(allow_guest=True)
 def receive_pdf():
@@ -28,11 +30,12 @@ def receive_pdf():
 
     # Handle non-PDF or no attachment
     if num_media == 0 or media_type != "application/pdf":
-        client.messages.create(
-            from_=TWILIO_WHATSAPP,
-            to=sender,
-            body="Hello, please send a PDF file instead of text or other file types."
-        )
+        if easwari_settings.disable_whatsapp_response == 0:
+            client.messages.create(
+                from_=TWILIO_WHATSAPP,
+                to=sender,
+                body="Hello, please send a PDF file instead of text or other file types."
+            )
         frappe.logger().error("Received a message, maybe no file attached or not a PDF.")
         return "No PDF"
 
@@ -73,11 +76,12 @@ def receive_pdf():
     frappe.db.commit()
 
     # Send confirmation message
-    client.messages.create(
-        from_=TWILIO_WHATSAPP,
-        to=sender,
-        body="File received, Thank You."
-    )
+    if easwari_settings.disable_whatsapp_response == 0:
+        client.messages.create(
+            from_=TWILIO_WHATSAPP,
+            to=sender,
+            body="File received, Thank You."
+        )
 
     # TwiML response
     frappe.local.response["http_status_code"] = 200
