@@ -6,64 +6,6 @@ from datetime import datetime
 
 
 class PDFtoPurchaseReceipt(Document):
-	def before_insert(self):
-		try:
-			if not self.supplier_delivery_pdf:
-				return
-
-			extracted_receipts = self._get_extracted_data()
-			if not extracted_receipts:
-				return
-
-			for rec in extracted_receipts:
-				items = rec.get("items")
-				if not items:
-					continue
-
-				# Match Supplier in DB
-				supplier_name = rec.get("supplier", "")
-				find_supplier = frappe.db.get_all(
-					"Supplier",
-					filters={"supplier_name": ["like", f"%{supplier_name}%"]},
-					fields=["name"],
-					limit=1
-				)
-				if not find_supplier:
-					continue
-
-				supplier_id = find_supplier[0].name
-				do_no = rec.get("do_no")
-
-				# Create Purchase Receipt for FOUND items only
-				found_items = [itm for itm in items if frappe.db.exists("Item", itm.get("item_code"))]
-				if not found_items:
-					continue
-
-				if do_no and frappe.db.exists("Purchase Receipt", do_no):
-					pr = frappe.get_doc("Purchase Receipt", do_no)
-				else:
-					pr = frappe.new_doc("Purchase Receipt")
-					if do_no:
-						pr.name = do_no
-					pr.supplier = supplier_id
-					pr.posting_date = self.date or datetime.today().date()
-
-				for itm in found_items:
-					if itm.get("item_code") not in [i.item_code for i in pr.items]:
-						pr.append("items", {
-							"item_code": itm.get("item_code"),
-							"qty": itm.get("qty"),
-							"warehouse": "",
-							"schedule_date": pr.posting_date
-						})
-
-				if pr.items:
-					pr.insert(ignore_permissions=True)
-					frappe.db.commit()
-
-		except Exception:
-			frappe.log_error(message=frappe.get_traceback(), title="PDF Purchase Receipt Processing Error")
-
 	def _get_extracted_data(self):
 		file_doc = frappe.get_all("File", filters={"file_url": self.supplier_delivery_pdf}, limit=1)
 		if not file_doc:
@@ -83,14 +25,28 @@ class PDFtoPurchaseReceipt(Document):
 				if do_match:
 					do_no = do_match.group()
 
-				# Extract supplier name from the line containing SRRI/MILLS/SDN BHD
+				# Extract supplier name dynamically (usually the first line below the top header)
 				supplier_raw = ""
 				for line in lines:
-					if "SRRI" in line or "MILLS" in line or "SDN BHD" in line:
+					# Skip the main title
+					if "DELIVERY ORDER" in line.upper() or line.startswith("DO-"):
+						continue
+					
+					# First substantial line is the supplier.
+					# It might overlap with 'Date :' on the right due to PDF columns.
+					# We strip any trailing parentheses or anything from 'Date' onwards.
+					match = re.search(r"^(.*?)(?:\(?NO\..*?\)?|\(.*?\)?|\s+Date\s*:|\s+Date:)", line, re.IGNORECASE)
+					if match:
+						supplier_raw = match.group(1).strip()
+					else:
+						# If no date attached, take the first visual column (split by 2+ spaces)
 						supplier_raw = re.split(r'\s{2,}', line)[0].strip()
+					
+					if len(supplier_raw) > 2:
 						break
-				if not supplier_raw and len(lines) > 1:
-					supplier_raw = lines[1]
+
+				# Fallback regex strip just in case
+				supplier_raw = re.sub(r'\(.*?\)', '', supplier_raw).strip()
 
 				# Parse item rows directly from text lines.
 				# Row format: "No ItemCode Description Qty Unit Batch [Remarks]"
@@ -125,22 +81,35 @@ class PDFtoPurchaseReceipt(Document):
 
 					# Match pattern: ... Qty UOM Batch [Price]
 					# Qty must be a number, UOM should not be a pure number.
-					if len(parts) >= 5 and is_number(parts[-3]) and not is_number(parts[-2]):
-						qty = float(parts[-3].replace(',', ''))
-						uom = parts[-2]
-						batch = parts[-1]
-						desc_end = -3
-					elif len(parts) >= 6 and is_number(parts[-4]) and not is_number(parts[-3]) and is_number(parts[-1]):
-						qty = float(parts[-4].replace(',', ''))
-						uom = parts[-3]
-						batch = parts[-2]
-						desc_end = -4
-					else:
+					try:
+						if len(parts) >= 5 and is_number(parts[-3]) and not is_number(parts[-2]):
+							qty = float(parts[-3].replace(',', ''))
+							uom = parts[-2]
+							batch = parts[-1]
+							desc_end = -3
+						elif len(parts) >= 6 and is_number(parts[-4]) and not is_number(parts[-3]) and is_number(parts[-1]):
+							qty = float(parts[-4].replace(',', ''))
+							uom = parts[-3]
+							batch = parts[-2]
+							desc_end = -4
+						else:
+							continue
+					except (IndexError, ValueError):
 						continue
 
 					no = parts[0]
 					raw_code = parts[1]
-					desc_parts = parts[2:desc_end]
+					desc_start_idx = 2
+					
+					# Fragmentation fix: If next part starts with '-' or is something like '15KG/BAG'
+					# check if it belongs to the Item Code.
+					if len(parts) > 3:
+						next_part = parts[2]
+						if next_part.startswith("-") or any(uom in next_part.upper() for uom in ["/BAG", "/CTN", "/BOX", "KG", "GRAM"]):
+							raw_code = raw_code + next_part
+							desc_start_idx = 3
+
+					desc_parts = parts[desc_start_idx:desc_end]
 					
 					# Smart un-weaving: find if raw_code starts with an existing Item Code in DB
 					# This perfectly splits overlapping text like "D241-25KG/BAGHALBA"
@@ -165,6 +134,10 @@ class PDFtoPurchaseReceipt(Document):
 							leftover = raw_code[idx:]
 							item_code = raw_code[:idx]
 							description = leftover + " " + " ".join(desc_parts)
+						elif "/BAG" in raw_code:
+							# Case: "D899-W-15KG/BAG" fully in raw_code
+							item_code = raw_code
+							description = " ".join(desc_parts)
 						else:
 							item_code = raw_code
 							description = " ".join(desc_parts)
@@ -199,34 +172,127 @@ class PDFtoPurchaseReceipt(Document):
 				return []
 
 			extracted_receipts = self._get_extracted_data()
-			result = []
+			if not extracted_receipts:
+				return []
 
+			# Consolidate all items across multiple pages if they belong to the same DO/Supplier
+			# For now, we assume one PDF = one logical receipt unless DO numbers differ.
+			# But usually, it is safer to group by DO Number.
+			
+			grouped_data = {}
 			for rec in extracted_receipts:
-				do_no = rec.get("do_no", "")
-				supplier = rec.get("supplier", "")
+				do_no = rec.get("do_no", "NO-DO")
+				if do_no not in grouped_data:
+					grouped_data[do_no] = {
+						"supplier_name": rec.get("supplier", ""),
+						"items": []
+					}
+				grouped_data[do_no]["items"].extend(rec.get("items", []))
 
-				# Check if PR exists for this DO number
+			result = []
+			pr_to_save_on_doc = self.purchase_receipt
+
+			for do_no, data in grouped_data.items():
+				supplier_name = data["supplier_name"]
+				items = data["items"]
+
+				# Locate Supplier ID
+				supplier_id = ""
+				if supplier_name:
+					find_supplier = frappe.db.get_all(
+						"Supplier",
+						filters={"supplier_name": ["like", f"%{supplier_name}%"]},
+						fields=["name"],
+						limit=1
+					)
+					if find_supplier:
+						supplier_id = find_supplier[0].name
+
+				# Check for existing PR
 				pr_name = ""
-				if do_no:
-					pr_name = frappe.db.get_value("Purchase Receipt", {"name": do_no}, "name") or ""
-
-				for itm in rec.get("items", []):
+				# 1. Check if we already have a PR linked to this Doc
+				if pr_to_save_on_doc and frappe.db.exists("Purchase Receipt", pr_to_save_on_doc):
+					pr_name = pr_to_save_on_doc
+				# 2. Check if a PR already exists with the DO number as name
+				elif do_no != "NO-DO" and frappe.db.exists("Purchase Receipt", do_no):
+					pr_name = do_no
+				
+				# Identify items already in DB vs missing
+				found_items = []
+				for itm in items:
 					item_code = itm.get("item_code")
-					item_exists = frappe.db.exists("Item", item_code)
+					
+					# Refined lookup: exact match first
+					if frappe.db.exists("Item", item_code):
+						itm["status"] = "Found"
+						found_items.append(itm)
+					# Fallback: check before "/" if not found
+					elif "/" in item_code:
+						base_code = item_code.split("/")[0].strip()
+						if frappe.db.exists("Item", base_code):
+							itm["item_code"] = base_code
+							itm["status"] = "Found"
+							found_items.append(itm)
+						else:
+							itm["status"] = "Not Found"
+					else:
+						itm["status"] = "Not Found"
 
+				# Auto-create/update PR if we have a supplier and items
+				if found_items and supplier_id:
+					if pr_name:
+						pr = frappe.get_doc("Purchase Receipt", pr_name)
+					else:
+						pr = frappe.new_doc("Purchase Receipt")
+						if do_no != "NO-DO":
+							pr.name = do_no
+						pr.supplier = supplier_id
+						pr.posting_date = self.date or datetime.today().date()
+					
+					needs_save = False
+					for f_itm in found_items:
+						if f_itm.get("item_code") not in [i.item_code for i in pr.items]:
+							pr.append("items", {
+								"item_code": f_itm.get("item_code"),
+								"qty": f_itm.get("qty"),
+								"uom": f_itm.get("uom"),
+								"schedule_date": pr.posting_date
+							})
+							needs_save = True
+					
+					if needs_save or pr.get("__islocal"):
+						if pr.get("__islocal"):
+							pr.insert(ignore_permissions=True)
+						else:
+							pr.save(ignore_permissions=True)
+						
+						frappe.db.commit()
+						pr_name = pr.name
+						
+						if not pr_to_save_on_doc:
+							pr_to_save_on_doc = pr_name
+
+				# Build result array for the UI table
+				for itm in items:
 					result.append({
 						"pr_name": pr_name,
-						"do_no": do_no,
+						"do_no": do_no if do_no != "NO-DO" else "",
 						"no": itm.get("no"),
-						"item_code": item_code,
+						"item_code": itm.get("item_code"),
 						"description": itm.get("description"),
 						"qty": itm.get("qty"),
 						"uom": itm.get("uom", ""),
 						"batch": itm.get("batch"),
 						"remarks": itm.get("remarks", ""),
-						"status": "Found" if item_exists else "Not Found",
-						"supplier": supplier
+						"status": itm.get("status"),
+						"supplier": supplier_name,
+						"supplier_status": "Found" if supplier_id else "Not Found"
 					})
+
+			if pr_to_save_on_doc and pr_to_save_on_doc != self.purchase_receipt:
+				self.purchase_receipt = pr_to_save_on_doc
+				self.save()
+				frappe.db.commit()
 
 			return result
 
@@ -242,36 +308,60 @@ def handle_pr_after_item(docname, do_no, item_row, supplier_name=""):
 		row = json.loads(item_row) if isinstance(item_row, str) else item_row
 		item_code = row.get("item_code")
 		qty = float(row.get("qty") or 1)
+		uom = row.get("uom", "")
 
 		if not frappe.db.exists("Item", item_code):
 			return {"status": "error", "error": f"Item '{item_code}' not found."}
 
 		# Find Supplier
-		find_supplier = frappe.db.get_all(
-			"Supplier",
-			filters={"supplier_name": ["like", f"%{supplier_name}%"]},
-			limit=1
-		)
-		supplier_id = find_supplier[0].name if find_supplier else ""
+		supplier_id = ""
+		if supplier_name:
+			find_supplier = frappe.db.get_all(
+				"Supplier",
+				filters={"supplier_name": ["like", f"%{supplier_name}%"]},
+				limit=1
+			)
+			if find_supplier:
+				supplier_id = find_supplier[0].name
+		
+		if not supplier_id:
+			return {"status": "error", "error": f"Supplier '{supplier_name}' not found. Please create the supplier first."}
 
-		if do_no and frappe.db.exists("Purchase Receipt", do_no):
+		parent_doc = frappe.get_doc("PDF to Purchase Receipt", docname)
+		pr_name = parent_doc.purchase_receipt
+
+		if pr_name and frappe.db.exists("Purchase Receipt", pr_name):
+			pr = frappe.get_doc("Purchase Receipt", pr_name)
+		elif do_no and frappe.db.exists("Purchase Receipt", do_no):
 			pr = frappe.get_doc("Purchase Receipt", do_no)
 		else:
 			pr = frappe.new_doc("Purchase Receipt")
 			if do_no:
 				pr.name = do_no
 			pr.supplier = supplier_id
-			pr.posting_date = frappe.get_doc("PDF to Purchase Receipt", docname).date or datetime.today().date()
+			pr.posting_date = parent_doc.date or datetime.today().date()
 
 		if item_code not in [i.item_code for i in pr.items]:
 			pr.append("items", {
 				"item_code": item_code,
 				"qty": qty,
+				"uom": uom,
 				"schedule_date": pr.posting_date
 			})
 
-		pr.insert(ignore_permissions=True)
+		if pr.get("__islocal"):
+			pr.insert(ignore_permissions=True)
+		else:
+			pr.save(ignore_permissions=True)
+		
 		frappe.db.commit()
+
+		# Update parent doc if needed
+		if not parent_doc.purchase_receipt:
+			parent_doc.purchase_receipt = pr.name
+			parent_doc.save()
+			frappe.db.commit()
+
 		return {"status": "ok", "pr_name": pr.name}
 
 	except Exception as e:

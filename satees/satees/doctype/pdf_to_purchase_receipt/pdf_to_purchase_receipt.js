@@ -29,11 +29,36 @@ frappe.ui.form.on("PDF to Purchase Receipt", {
 		const $wrapper = frm.get_field("item_list").$wrapper;
 		$wrapper.empty();
 
+		if (items.length > 0) {
+			const supplierName = items[0].supplier;
+			const supplierStatus = items[0].supplier_status;
+			
+			if (supplierStatus === "Not Found") {
+				$wrapper.append(`
+					<div style="margin-bottom: 12px; padding: 10px 15px; background: #fde8e8; border: 1px solid #f5c6cb; border-radius: 4px; color: #c0392b; font-size: 13px; display: flex; justify-content: space-between; align-items: center;">
+						<div>
+							<strong>Warning:</strong> The supplier <strong>${supplierName}</strong> extracted from the PDF was not found in the system. 
+							Please create this supplier before creating items or Purchase Receipts.
+						</div>
+						<button class="btn btn-xs btn-danger wpr-create-supplier-btn" data-supplier="${(supplierName || "").replace(/"/g, "&quot;")}">
+							${__("Create Supplier")}
+						</button>
+					</div>
+				`);
+			} else {
+				$wrapper.append(`
+					<div style="margin-bottom: 12px; padding: 10px 15px; background: #d4f7e3; border: 1px solid #a3e9c4; border-radius: 4px; color: #1a7f3c; font-size: 13px;">
+						<strong>Supplier Found:</strong> ${supplierName}
+					</div>
+				`);
+			}
+		}
+
 		if (!document.getElementById("wpr-lv-styles")) {
 			const s = document.createElement("style");
 			s.id = "wpr-lv-styles";
 			s.textContent = `
-				.wpr-lv-wrap { width: 100%; overflow-x: auto; border: 1px solid var(--border-color); border-radius: var(--border-radius); background: var(--card-bg); margin-top: 8px; }
+				.wpr-lv-wrap { width: 100%; overflow-x: auto; border: 1px solid var(--border-color); border-radius: var(--border-radius); background: var(--card-bg); margin-top: 4px; }
 				.wpr-lv { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
 				.wpr-lv thead th { padding: 8px 10px; font-weight: 600; font-size: var(--text-xs); color: var(--heading-color); background: var(--subtle-fg); border-bottom: 2px solid var(--border-color); text-align: left; white-space: nowrap; }
 				.wpr-lv tbody td { padding: 7px 10px; vertical-align: middle; border-bottom: 1px solid var(--border-color); color: var(--text-color); font-size: var(--text-sm); }
@@ -78,6 +103,7 @@ frappe.ui.form.on("PDF to Purchase Receipt", {
 					data-uom="${item.uom || ""}"
 					data-do-no="${item.do_no || ""}"
 					data-qty="${item.qty || 1}"
+					data-batch="${(item.batch || "").replace(/"/g, "&quot;")}"
 					data-supplier="${(item.supplier || "").replace(/"/g, "&quot;")}">
 					${__("Create")}
 				</button>` : "";
@@ -114,6 +140,7 @@ frappe.ui.form.on("PDF to Purchase Receipt", {
 			const uom = $btn.data("uom");
 			const do_no = $btn.data("do-no");
 			const qty = $btn.data("qty");
+			const batch = $btn.data("batch");
 			const supplier = $btn.data("supplier");
 
 			localStorage.setItem("wpr_pending", JSON.stringify({
@@ -122,6 +149,7 @@ frappe.ui.form.on("PDF to Purchase Receipt", {
 				uom,
 				do_no,
 				qty,
+				batch,
 				supplier
 			}));
 
@@ -131,11 +159,32 @@ frappe.ui.form.on("PDF to Purchase Receipt", {
 						f.set_value("item_code", item_code);
 						f.set_value("item_name", desc || item_code);
 						if (uom) f.set_value("stock_uom", uom);
+						if (batch) f.set_value("has_batch_no", 1);
 					}
 					frappe.ui.form.off("Item", "refresh");
 				}
 			});
 			frappe.set_route("Form", "Item", "new-item-1");
+		});
+
+		// Handle Create Supplier button
+		$wrapper.on("click", ".wpr-create-supplier-btn", function() {
+			const $btn = $(this);
+			const supplier_name = $btn.data("supplier");
+
+			localStorage.setItem("wpr_pending_supplier", JSON.stringify({
+				docname: frm.doc.name
+			}));
+
+			frappe.ui.form.on("Supplier", {
+				refresh(f) {
+					if (f.is_new()) {
+						f.set_value("supplier_name", supplier_name);
+					}
+					frappe.ui.form.off("Supplier", "refresh");
+				}
+			});
+			frappe.set_route("Form", "Supplier", "new-supplier-1");
 		});
 	}
 });
@@ -179,7 +228,7 @@ frappe.router.on("change", () => {
 					args: {
 						docname: c.docname,
 						do_no: c.do_no,
-						item_row: JSON.stringify({ item_code: f.doc.name, qty: c.qty }),
+						item_row: JSON.stringify({ item_code: f.doc.name, qty: c.qty, uom: c.uom }),
 						supplier_name: c.supplier
 					},
 					callback(r) {
@@ -188,9 +237,46 @@ frappe.router.on("change", () => {
 						} else if (r.message) {
 							frappe.msgprint({ title: __("Error"), indicator: "red", message: r.message.error || __("Unknown error") });
 						}
+						// Navigate back; the router change handler will detect the return
+						// to "PDF to Purchase Receipt" and call get_items to refresh.
 						frappe.set_route("Form", "PDF to Purchase Receipt", c.docname);
 					}
 				});
+			}
+		});
+	}
+
+	// Also handle return to PDF from Supplier creation
+	const pending_supplier = localStorage.getItem("wpr_pending_supplier");
+	if (pending_supplier) {
+		let ctx_supp;
+		try { ctx_supp = JSON.parse(pending_supplier); } catch (e) { }
+		if (ctx_supp && route[0] === "Form" && route[1] === "PDF to Purchase Receipt" && route[2] === ctx_supp.docname) {
+			localStorage.removeItem("wpr_pending_supplier");
+			setTimeout(() => {
+				if (cur_frm && cur_frm.doctype === "PDF to Purchase Receipt") {
+					cur_frm.trigger("get_items");
+				}
+			}, 600);
+			return;
+		}
+	}
+
+	// When on Supplier form, listen for save
+	if (route[0] === "Form" && route[1] === "Supplier") {
+		frappe.ui.form.on("Supplier", {
+			after_save(f) {
+				const still = localStorage.getItem("wpr_pending_supplier");
+				if (!still) return;
+				let c;
+				try { c = JSON.parse(still); } catch (e) { return; }
+
+				localStorage.removeItem("wpr_pending_supplier");
+				frappe.show_alert({ message: __("Supplier created. Returning to PDF..."), indicator: "green" });
+
+				setTimeout(() => {
+					frappe.set_route("Form", "PDF to Purchase Receipt", c.docname);
+				}, 1000);
 			}
 		});
 	}

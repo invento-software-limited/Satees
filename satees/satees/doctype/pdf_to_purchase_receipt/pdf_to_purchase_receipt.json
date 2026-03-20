@@ -7,6 +7,7 @@
  "field_order": [
   "supplier_delivery_pdf",
   "date",
+  "purchase_receipt",
   "section_break_eomq",
   "item_list"
  ],
@@ -31,6 +32,13 @@
    "fieldname": "date",
    "fieldtype": "Date",
    "label": "Date"
+  },
+  {
+   "fieldname": "purchase_receipt",
+   "fieldtype": "Link",
+   "label": "Purchase Receipt",
+   "options": "Purchase Receipt",
+   "read_only": 1
   }
  ],
  "grid_page_length": 50,
