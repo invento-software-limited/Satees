@@ -1,0 +1,75 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-03-20 16:56:42.752758",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "twilio_whatsapp_integration_settings_section",
+  "twilio_sid",
+  "twilio_auth_token",
+  "column_break_ixwl",
+  "twilio_whatsapp_number",
+  "disable_whatsapp_response"
+ ],
+ "fields": [
+  {
+   "fieldname": "twilio_whatsapp_integration_settings_section",
+   "fieldtype": "Section Break",
+   "label": "Twilio Whatsapp Integration Settings"
+  },
+  {
+   "fieldname": "twilio_sid",
+   "fieldtype": "Data",
+   "label": "TWILIO SID"
+  },
+  {
+   "fieldname": "twilio_auth_token",
+   "fieldtype": "Data",
+   "label": "TWILIO AUTH TOKEN"
+  },
+  {
+   "fieldname": "column_break_ixwl",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "twilio_whatsapp_number",
+   "fieldtype": "Data",
+   "label": "TWILIO WHATSAPP NUMBER",
+   "placeholder": "+14155238886"
+  },
+  {
+   "default": "0",
+   "description": "if enabled: A response Message will be send to the user after Received Message",
+   "fieldname": "disable_whatsapp_response",
+   "fieldtype": "Check",
+   "label": "Disable Whatsapp Response"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-03-20 17:03:35.071483",
+ "modified_by": "Administrator",
+ "module": "Satees",
+ "name": "Easwari Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}
