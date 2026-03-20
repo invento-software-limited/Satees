@@ -144,12 +144,15 @@ class PdfToSalesOrder(Document):
 
 					elif current_order and str(row[0])[0].isdigit():
 						item = row[0].split(" ")
+						des = item[2:-4]
+						
 						if len(item) > 5:
 							current_order["items"].append({
 								"item_code":     item[1].split('/')[0],
 								"location":      item[-4],
 								"qty":           item[-2],
 								"delivery_date": item[-3],
+								"description": " ".join(des)
 							})
 
 		if current_order:
@@ -202,9 +205,10 @@ class PdfToSalesOrder(Document):
 				if find_item:
 					status      = "Found"
 					description = find_item[0].get("item_name") or ""
+					item_code = find_item[0].get("name") or ""
 				else:
 					status      = "Missing"
-					description = ""
+					description = item.get("description")
 
 				# Parse delivery date safely
 				raw_date = item.get("delivery_date", "")
@@ -233,17 +237,6 @@ class PdfToSalesOrder(Document):
 				seq += 1
 
 		return result
-
-
-	@frappe.whitelist()
-	def search_customer(self, query):
-		results = frappe.db.get_all(
-			"Customer",
-			filters={"customer_name": ["like", f'%{query}%']},
-			fields=["name", "customer_name"],
-			limit=10
-		)
-		return results
 
 
 # ── Standalone whitelisted function ──────────────────────────────────────
