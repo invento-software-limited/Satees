@@ -32,7 +32,7 @@ frappe.ui.form.on("Pdf To Sales Order", {
                     margin-top: 8px;
                 }
                 .wpdf-lv {
-                    width: 100%;
+                  
                     border-collapse: collapse;
                     font-size: var(--text-sm);
                     table-layout: fixed;
