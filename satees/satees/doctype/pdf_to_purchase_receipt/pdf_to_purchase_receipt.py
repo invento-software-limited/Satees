@@ -221,10 +221,14 @@ class PDFtoPurchaseReceipt(Document):
 				found_items = []
 				for itm in items:
 					item_code = itm.get("item_code")
+					batch_no = itm.get("batch", "")
 					
 					# Refined lookup: exact match first
 					if frappe.db.exists("Item", item_code):
 						itm["status"] = "Found"
+						# Auto-create Batch if present in PDF and not yet in system
+						if batch_no:
+							_ensure_batch(item_code, batch_no)
 						found_items.append(itm)
 					# Fallback: check before "/" if not found
 					elif "/" in item_code:
@@ -232,6 +236,8 @@ class PDFtoPurchaseReceipt(Document):
 						if frappe.db.exists("Item", base_code):
 							itm["item_code"] = base_code
 							itm["status"] = "Found"
+							if batch_no:
+								_ensure_batch(base_code, batch_no)
 							found_items.append(itm)
 						else:
 							itm["status"] = "Not Found"
@@ -250,12 +256,17 @@ class PDFtoPurchaseReceipt(Document):
 						pr.posting_date = self.date or datetime.today().date()
 					
 					needs_save = False
+					existing_combos = {
+						(i.item_code, i.batch_no or "") for i in pr.items
+					}
 					for f_itm in found_items:
-						if f_itm.get("item_code") not in [i.item_code for i in pr.items]:
+						combo = (f_itm.get("item_code"), f_itm.get("batch") or "")
+						if combo not in existing_combos:
 							pr.append("items", {
 								"item_code": f_itm.get("item_code"),
 								"qty": f_itm.get("qty"),
 								"uom": f_itm.get("uom"),
+								"batch_no": f_itm.get("batch") or "",
 								"schedule_date": pr.posting_date
 							})
 							needs_save = True
@@ -301,68 +312,47 @@ class PDFtoPurchaseReceipt(Document):
 			return []
 
 
+def _ensure_batch(item_code, batch_no):
+	"""Create a Batch record for item_code if it doesn't already exist."""
+	if not batch_no:
+		return
+	if not frappe.db.exists("Batch", {"batch_id": batch_no, "item": item_code}):
+		try:
+			batch_doc = frappe.new_doc("Batch")
+			batch_doc.batch_id = batch_no
+			batch_doc.item = item_code
+			batch_doc.insert(ignore_permissions=True)
+			frappe.db.commit()
+		except Exception:
+			# Log but don't fail the whole operation
+			frappe.log_error(message=frappe.get_traceback(), title=f"Batch Create Error: {batch_no} / {item_code}")
+
+
 @frappe.whitelist()
-def handle_pr_after_item(docname, do_no, item_row, supplier_name=""):
+def handle_pr_after_item(docname, do_no, item_row, supplier_name="", batch_no=""):
 	import json
 	try:
 		row = json.loads(item_row) if isinstance(item_row, str) else item_row
 		item_code = row.get("item_code")
-		qty = float(row.get("qty") or 1)
-		uom = row.get("uom", "")
 
 		if not frappe.db.exists("Item", item_code):
 			return {"status": "error", "error": f"Item '{item_code}' not found."}
 
-		# Find Supplier
-		supplier_id = ""
-		if supplier_name:
-			find_supplier = frappe.db.get_all(
-				"Supplier",
-				filters={"supplier_name": ["like", f"%{supplier_name}%"]},
-				limit=1
-			)
-			if find_supplier:
-				supplier_id = find_supplier[0].name
-		
-		if not supplier_id:
-			return {"status": "error", "error": f"Supplier '{supplier_name}' not found. Please create the supplier first."}
+		# Create Batch for the newly created item if batch_no was in the PDF
+		if batch_no:
+			_ensure_batch(item_code, batch_no)
 
+		# Re-run full get_items() on the PDF doc — this re-parses the PDF,
+		# finds ALL items (including the one just created), and upserts all
+		# of them into the Purchase Receipt using the item+batch combo check.
 		parent_doc = frappe.get_doc("PDF to Purchase Receipt", docname)
-		pr_name = parent_doc.purchase_receipt
+		result = parent_doc.get_items()
 
-		if pr_name and frappe.db.exists("Purchase Receipt", pr_name):
-			pr = frappe.get_doc("Purchase Receipt", pr_name)
-		elif do_no and frappe.db.exists("Purchase Receipt", do_no):
-			pr = frappe.get_doc("Purchase Receipt", do_no)
-		else:
-			pr = frappe.new_doc("Purchase Receipt")
-			if do_no:
-				pr.name = do_no
-			pr.supplier = supplier_id
-			pr.posting_date = parent_doc.date or datetime.today().date()
+		pr_name = ""
+		if result:
+			pr_name = result[0].get("pr_name", "")
 
-		if item_code not in [i.item_code for i in pr.items]:
-			pr.append("items", {
-				"item_code": item_code,
-				"qty": qty,
-				"uom": uom,
-				"schedule_date": pr.posting_date
-			})
-
-		if pr.get("__islocal"):
-			pr.insert(ignore_permissions=True)
-		else:
-			pr.save(ignore_permissions=True)
-		
-		frappe.db.commit()
-
-		# Update parent doc if needed
-		if not parent_doc.purchase_receipt:
-			parent_doc.purchase_receipt = pr.name
-			parent_doc.save()
-			frappe.db.commit()
-
-		return {"status": "ok", "pr_name": pr.name}
+		return {"status": "ok", "pr_name": pr_name}
 
 	except Exception as e:
 		return {"status": "error", "error": str(e)}

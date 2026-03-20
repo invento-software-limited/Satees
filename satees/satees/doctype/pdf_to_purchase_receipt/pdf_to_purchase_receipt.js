@@ -229,7 +229,8 @@ frappe.router.on("change", () => {
 						docname: c.docname,
 						do_no: c.do_no,
 						item_row: JSON.stringify({ item_code: f.doc.name, qty: c.qty, uom: c.uom }),
-						supplier_name: c.supplier
+						supplier_name: c.supplier,
+						batch_no: c.batch || ""
 					},
 					callback(r) {
 						if (r.message && r.message.status === "ok") {
