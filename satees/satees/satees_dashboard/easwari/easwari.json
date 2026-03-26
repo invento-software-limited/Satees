@@ -1,0 +1,38 @@
+{
+ "cards": [
+  {
+   "card": "Incoming WhatsApp Messages (Today)"
+  },
+  {
+   "card": "PDFs Received (Today)"
+  },
+  {
+   "card": "Sales Orders from PDF (This Month)"
+  },
+  {
+   "card": "Purchase Receipts from PDF (This Month)"
+  }
+ ],
+ "charts": [
+  {
+   "chart": "WhatsApp Traffic (Last 30 Days)",
+   "width": "Full"
+  },
+  {
+   "chart": "Sales Order Automation (Last 30 Days)",
+   "width": "Full"
+  }
+ ],
+ "creation": "2026-03-26 15:12:26.373180",
+ "dashboard_name": "Easwari",
+ "docstatus": 0,
+ "doctype": "Dashboard",
+ "idx": 0,
+ "is_default": 1,
+ "is_standard": 1,
+ "modified": "2026-03-26 15:20:00.000000",
+ "modified_by": "Administrator",
+ "module": "Satees",
+ "name": "Easwari",
+ "owner": "Administrator"
+}

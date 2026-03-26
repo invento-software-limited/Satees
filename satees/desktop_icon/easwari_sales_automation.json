@@ -1,0 +1,27 @@
+{
+    "app": "satees",
+    "bg_color": "blue",
+    "creation": "2026-03-26 15:03:29.739317",
+    "docstatus": 0,
+    "doctype": "Desktop Icon",
+    "hidden": 0,
+    "icon_image": "/assets/satees/img/logo.png",
+    "icon_type": "App",
+    "idx": 0,
+    "label": "Easwari Sales Automation",
+    "link_to": "Easwari Sales Automation",
+    "link_type": "Workspace Sidebar",
+    "logo_url": "/assets/satees/img/logo.png",
+    "modified": "2026-03-26 15:07:11.725755",
+    "modified_by": "Administrator",
+    "name": "Easwari Sales Automation",
+    "owner": "Administrator",
+    "restrict_removal": 0,
+    "roles": [
+        {
+            "role": "All"
+        }
+    ],
+    "sidebar": "",
+    "standard": 1
+}

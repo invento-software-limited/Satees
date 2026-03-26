@@ -1,8 +1,8 @@
 app_name = "satees"
-app_title = "Satees"
-app_publisher = "Abdul Hasib"
+app_title = "Easwari"
+app_publisher = "Invento Software Limited"
 app_description = "whatsapp message automation"
-app_email = "hasib@invento.com.bd"
+app_email = "hello@invento.com.bd"
 app_license = "mit"
 
 # Apps
@@ -11,15 +11,15 @@ app_license = "mit"
 # required_apps = []
 
 # Each item in the list will be shown as an app in the apps page
-# add_to_apps_screen = [
-# 	{
-# 		"name": "satees",
-# 		"logo": "/assets/satees/logo.png",
-# 		"title": "Satees",
-# 		"route": "/satees",
-# 		"has_permission": "satees.api.permission.has_app_permission"
-# 	}
-# ]
+add_to_apps_screen = [
+	{
+		"name": "satees",
+		"logo": "/assets/satees/img/logo.png",
+		"title": "Easwari",
+		"route": "/satees",
+		# "has_permission": "satees.api.permission.has_app_permission"
+	}
+]
 
 # Includes in <head>
 # ------------------
