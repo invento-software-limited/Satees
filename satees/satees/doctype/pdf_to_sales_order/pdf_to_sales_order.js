@@ -3,8 +3,41 @@
 
 
 frappe.ui.form.on("Pdf To Sales Order", {
-    refresh(frm) { frm.trigger("get_items"); },
-    pdf(frm)     { frm.trigger("get_items"); },
+    refresh(frm) {
+        frm.add_custom_button(__("Refresh Lookups"), () => {
+            frm.call({ method: "revalidate_lookups", doc: frm.doc }).then((r) => {
+                if (r.message) frm.events.render_items_table(frm, r.message);
+            });
+        });
+        frm.add_custom_button(__("Create Sales Orders"), () => {
+            frappe.confirm(__("Create Sales Orders for all valid rows?"), () => {
+                frm.call({ method: "create_sales_orders", doc: frm.doc }).then((r) => {
+                    if (r.message) {
+                        frappe.msgprint({
+                            title: __("Bulk Process Results"),
+                            message: r.message.replace(/\n/g, "<br>"),
+                            indicator: "green"
+                        });
+                    }
+                });
+            });
+        });
+        frm.add_custom_button(__("Reread PDF"), () => {
+            frm.trigger("get_items");
+        });
+
+        if (frm.doc.pdf_data) {
+            try {
+                const items = typeof frm.doc.pdf_data === "string" ? JSON.parse(frm.doc.pdf_data) : frm.doc.pdf_data;
+                if (items && items.length > 0) {
+                    frm.events.render_items_table(frm, items);
+                    return;
+                }
+            } catch (e) {
+                console.error("Failed to parse pdf_data:", e);
+            }
+        }
+    },
 
     get_items(frm) {
         frm.call({ method: "get_items", doc: frm.doc }).then((r) => {
@@ -15,8 +48,8 @@ frappe.ui.form.on("Pdf To Sales Order", {
     render_items_table(frm, items) {
         const $wrapper = frm.get_field("item_list").$wrapper;
         $wrapper.empty();
-        frm._resolved   = {};
-        frm._controls   = {};
+        frm._resolved = {};
+        frm._controls = {};
         frm._last_items = items;
 
         if (!document.getElementById("wpdf-lv-styles")) {
@@ -40,13 +73,12 @@ frappe.ui.form.on("Pdf To Sales Order", {
                 /* Column widths */
                 .wpdf-lv .wpdf-col-serial   { width: 38px; }
                 .wpdf-lv .wpdf-col-so       { width: 150px; }
-                .wpdf-lv .wpdf-col-customer { width: 150px; }
-                .wpdf-lv .wpdf-col-itemcode { width: 110px; }
-                .wpdf-lv .wpdf-col-desc     { width: 150px; }
-                .wpdf-lv .wpdf-col-location { width: 140px; }
+                .wpdf-lv .wpdf-col-customer { width: 180px; }
+                .wpdf-lv .wpdf-col-itemcode { width: 180px; }
+                .wpdf-lv .wpdf-col-desc     { width: 220px; }
+                .wpdf-lv .wpdf-col-location { width: 150px; }
                 .wpdf-lv .wpdf-col-date     { width: 120px; }
                 .wpdf-lv .wpdf-col-qty      { width: 70px; }
-                .wpdf-lv .wpdf-col-status   { width: 130px; }
                 /* Header */
                 .wpdf-lv thead th {
                     padding: 9px 10px;
@@ -61,8 +93,7 @@ frappe.ui.form.on("Pdf To Sales Order", {
                     text-overflow: ellipsis;
                 }
                 .wpdf-lv thead th.wpdf-col-serial,
-                .wpdf-lv thead th.wpdf-col-qty,
-                .wpdf-lv thead th.wpdf-col-status { text-align: center; }
+                .wpdf-lv thead th.wpdf-col-qty { text-align: center; }
                 /* Rows */
                 .wpdf-lv tbody tr {
                     border-bottom: 1px solid var(--border-color);
@@ -71,13 +102,17 @@ frappe.ui.form.on("Pdf To Sales Order", {
                 }
                 .wpdf-lv tbody tr:last-child { border-bottom: none; }
                 .wpdf-lv tbody tr:hover { background: var(--hover-bg, var(--fg-color)); }
+                .wpdf-lv tbody tr:focus-within {
+                    z-index: 10;
+                    position: relative;
+                }
                 /* Cells */
                 .wpdf-lv tbody td {
                     padding: 7px 10px;
                     vertical-align: top;
                     color: var(--text-color);
                     font-size: var(--text-sm);
-                    overflow: hidden;
+                    overflow: visible;
                 }
                 .wpdf-lv tbody td.wpdf-col-serial {
                     text-align: center;
@@ -86,16 +121,15 @@ frappe.ui.form.on("Pdf To Sales Order", {
                     font-size: var(--text-xs);
                     padding: 7px 4px;
                 }
-                .wpdf-lv tbody td.wpdf-col-status {
-                    text-align: center;
-                    vertical-align: middle;
-                }
                 .wpdf-lv-desc {
                     white-space: normal;
                     word-break: break-word;
                     overflow-wrap: break-word;
                 }
                 /* Frappe controls compact */
+                .wpdf-ctrl {
+                    position: relative;
+                }
                 .wpdf-ctrl .frappe-control        { margin-bottom: 0 !important; }
                 .wpdf-ctrl .form-group            { margin-bottom: 0 !important; }
                 .wpdf-ctrl .control-label         { display: none !important; }
@@ -186,7 +220,7 @@ frappe.ui.form.on("Pdf To Sales Order", {
         }
 
         // ── Table skeleton ────────────────────────────────────────────────
-        const $wrap  = $(`<div class="wpdf-lv-wrap"></div>`);
+        const $wrap = $(`<div class="wpdf-lv-wrap"></div>`);
         const $table = $(`<table class="wpdf-lv"></table>`);
         const $thead = $(`<thead><tr>
             <th class="wpdf-col-serial">#</th>
@@ -197,7 +231,6 @@ frappe.ui.form.on("Pdf To Sales Order", {
             <th class="wpdf-col-location">${__("Location")}</th>
             <th class="wpdf-col-date">${__("Delivery Date")}</th>
             <th class="wpdf-col-qty">${__("Qty")}</th>
-            <th class="wpdf-col-status">${__("Status")}</th>
         </tr></thead>`);
         const $tbody = $(`<tbody></tbody>`);
         $table.append($thead).append($tbody);
@@ -212,24 +245,47 @@ frappe.ui.form.on("Pdf To Sales Order", {
         }
 
         function link_cell(opts) {
-            const $td   = $(`<td class="${opts.col_class || ""}"></td>`);
+            const $td = $(`<td class="${opts.col_class || ""}"></td>`);
             const $ctrl = $(`<div class="wpdf-ctrl"></div>`);
-            const ctrl  = make_ctrl({
-                fieldtype:   "Link",
-                fieldname:   opts.fieldname,
-                options:     opts.doctype,
-                read_only:   opts.read_only ? 1 : 0,
-                placeholder: opts.read_only ? "" : __("Search…"),
-            }, $ctrl[0]);
-            ctrl.set_value(opts.value || "");
-            if (!opts.read_only && opts.on_change) {
-                ctrl.$input.on("change", () => opts.on_change(ctrl.get_value()));
+
+            let $hint = null;
+            if (opts.hint) {
+                $hint = $(`<span class="wpdf-hint">${opts.hint}</span>`);
+                $td.append($hint);
             }
-            if (opts.hint) $td.append(`<span class="wpdf-hint">${opts.hint}</span>`);
+
+            let $btn = null;
+            let initialized = false;
+
+            const ctrl = make_ctrl({
+                fieldtype: "Link",
+                fieldname: opts.fieldname,
+                options: opts.doctype,
+                read_only: opts.read_only ? 1 : 0,
+                placeholder: opts.read_only ? "" : __("Search…"),
+                change: function () {
+                    if (!initialized) return;
+                    const val = this.get_value();
+                    if (val && $hint) $hint.hide();
+                    else if (!val && $hint) $hint.show();
+
+                    if ($btn) {
+                        if (val) $btn.hide();
+                        else $btn.show();
+                    }
+
+                    if (opts.on_change) opts.on_change(val);
+                }
+            }, $ctrl[0]);
+
+            ctrl.set_value(opts.value || "");
+            setTimeout(() => { initialized = true; }, 100);
             $td.append($ctrl);
+
             if (opts.add_new_label) {
-                const $btn = $(`<button class="btn btn-xs btn-default wpdf-add-btn">${opts.add_new_label}</button>`);
+                $btn = $(`<button class="btn btn-xs btn-default wpdf-add-btn">${opts.add_new_label}</button>`);
                 $btn.on("click", opts.add_new_click);
+                if (opts.value) $btn.hide();
                 $td.append($btn);
             }
             return { $td, ctrl };
@@ -265,12 +321,13 @@ frappe.ui.form.on("Pdf To Sales Order", {
 
             // _resolved tracks live user edits for this row
             frm._resolved[seq] = {
-                so_no:         item.so_no        || "",
-                so_exists:     item.so_exists     || false,   // ← track live
-                customer_id:   item.customer_id  || "",
-                location:      (item.location && item.location !== "Not Found") ? item.location : "",
+                so_no: item.so_no || "",
+                so_exists: item.so_exists || false,
+                customer_id: item.customer_id || "",
+                item_code: item.item_found ? item.item_code : "",
+                location: (item.location && item.location !== "Not Found") ? item.location : "",
                 delivery_date: item.delivery_date || "",
-                qty:           item.qty           || "",
+                qty: item.qty || "",
             };
             frm._controls[seq] = {};
 
@@ -285,7 +342,7 @@ frappe.ui.form.on("Pdf To Sales Order", {
             if (item.so_exists) {
                 // Exists → read-only link
                 const $c = $(`<div class="wpdf-ctrl"></div>`);
-                const c  = make_ctrl({ fieldtype:"Link", fieldname:`so_${seq}`, options:"Sales Order", read_only:1 }, $c[0]);
+                const c = make_ctrl({ fieldtype: "Link", fieldname: `so_${seq}`, options: "Sales Order", read_only: 1 }, $c[0]);
                 c.set_value(item.so_no);
                 $so_td.append($c);
             } else {
@@ -294,7 +351,7 @@ frappe.ui.form.on("Pdf To Sales Order", {
                     <input type="text"
                         class="form-control form-control-sm wpdf-so-plain"
                         data-seq="${seq}"
-                        value="${(item.so_no || "").replace(/"/g,"&quot;")}"
+                        value="${(item.so_no || "").replace(/"/g, "&quot;")}"
                         placeholder="${__("Enter SO ID…")}">
                 `);
                 const $alert = $(`<div class="wpdf-so-alert" style="display:none;"></div>`);
@@ -316,7 +373,7 @@ frappe.ui.form.on("Pdf To Sales Order", {
                     $(this).data("_t", setTimeout(() => {
                         frappe.call({
                             method: "frappe.client.get_value",
-                            args: { doctype:"Sales Order", filters:{ name: val }, fieldname:"name" },
+                            args: { doctype: "Sales Order", filters: { name: val }, fieldname: "name" },
                             callback(r) {
                                 const found = !!(r.message && r.message.name);
                                 // Update resolved so_exists live
@@ -335,29 +392,81 @@ frappe.ui.form.on("Pdf To Sales Order", {
             const { $td: $cust_td, ctrl: cust_ctrl } = link_cell({
                 col_class: "wpdf-col-customer",
                 fieldname: `cust_${seq}`, doctype: "Customer",
-                value:         item.customer_found ? (item.customer_id || item.customer) : "",
-                read_only:     item.customer_found,
-                hint:          !item.customer_found && item.customer ? item.customer : null,
-                on_change:     (v) => { frm._resolved[seq].customer_id = v; },
+                value: item.customer_id || item.customer || "",
+                read_only: item.customer_found,
+                hint: !item.customer_found && item.customer ? item.customer : null,
+                on_change: (v) => {
+                    frm._resolved[seq].customer_id = v;
+                    const itm = (frm._last_items || []).find(i => i.seq == seq);
+                    if (itm) {
+                        itm.customer_id = v;
+                        itm.customer_found = !!v;
+                        if (v) itm.customer = v;
+                        frm.set_value("pdf_data", JSON.stringify(frm._last_items));
+                        frm.dirty();
+                    }
+                },
                 add_new_label: !item.customer_found ? __("+ Add New") : null,
                 add_new_click: !item.customer_found ? () => {
                     const name = item.customer || "";
                     localStorage.setItem("wpdf_pending", JSON.stringify({
                         docname: frm.doc.name, type: "customer", prefill: { customer_name: name },
                     }));
-                    frappe.ui.form.on("Customer", { refresh(f) {
-                        if (!f.is_new()) return;
-                        f.set_value("customer_name", name);
-                        frappe.ui.form.off("Customer", "refresh");
-                    }});
+                    frappe.ui.form.on("Customer", {
+                        refresh(f) {
+                            if (!f.is_new()) return;
+                            f.set_value("customer_name", name);
+                            frappe.ui.form.off("Customer", "refresh");
+                        }
+                    });
                     frappe.set_route("Form", "Customer", "new-customer-1");
                 } : null,
             });
             if (!item.customer_found) frm._controls[seq].customer = cust_ctrl;
             $tr.append($cust_td);
 
-            // ── Item Code & Description ───────────────────────────────────
-            $tr.append(`<td class="wpdf-col-itemcode" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${item.item_code || ""}</td>`);
+            // ── Item Code ──────────────────────────────────────────────────
+            const { $td: $item_td, ctrl: item_ctrl } = link_cell({
+                col_class: "wpdf-col-itemcode",
+                fieldname: `item_${seq}`, doctype: "Item",
+                value: item.item_found ? item.item_code : "",
+                read_only: item.item_found,
+                hint: !item.item_found && item.item_code ? item.item_code : null,
+                on_change: (v) => {
+                    console.log("WPDF: Item on_change callback:", v);
+                    frm._resolved[seq].item_code = v;
+                    const itm = (frm._last_items || []).find(i => i.seq == seq);
+                    if (itm) {
+                        itm.item_code = v;
+                        itm.item_found = !!v;
+                        frm.set_value("pdf_data", JSON.stringify(frm._last_items));
+                        frm.dirty();
+                        console.log("WPDF: pdf_data updated for item");
+                    }
+                    frm.events.refresh_create_btn(frm, seq);
+                },
+                add_new_label: !item.item_found ? __("+ Add New") : null,
+                add_new_click: !item.item_found ? () => {
+                    const code = item.item_code || "";
+                    const desc = item.description || "";
+                    localStorage.setItem("wpdf_pending", JSON.stringify({
+                        docname: frm.doc.name, type: "item", prefill: { item_code: code, item_name: desc },
+                    }));
+                    frappe.ui.form.on("Item", {
+                        refresh(f) {
+                            if (!f.is_new()) return;
+                            f.set_value("item_code", code);
+                            f.set_value("item_name", desc);
+                            frappe.ui.form.off("Item", "refresh");
+                        }
+                    });
+                    frappe.set_route("Form", "Item", "new-item-1");
+                } : null,
+            });
+            if (!item.item_found) frm._controls[seq].item = item_ctrl;
+            $tr.append($item_td);
+
+            // ── Description ───────────────────────────────────────────────
             $tr.append(`<td class="wpdf-col-desc wpdf-lv-desc">${item.description || ""}</td>`);
 
             // ── Location ──────────────────────────────────────────────────
@@ -365,11 +474,20 @@ frappe.ui.form.on("Pdf To Sales Order", {
             const { $td: $loc_td, ctrl: loc_ctrl } = link_cell({
                 col_class: "wpdf-col-location",
                 fieldname: `loc_${seq}`, doctype: "Warehouse",
-                value:         loc_found ? item.location : "",
-                read_only:     loc_found,
-                hint:          !loc_found && item.raw_location ? item.raw_location : null,
-                on_change:     (v) => {
+                value: loc_found ? item.location : "",
+                read_only: loc_found,
+                hint: !loc_found && item.raw_location ? item.raw_location : null,
+                on_change: (v) => {
+                    console.log("WPDF: Location on_change callback:", v);
                     frm._resolved[seq].location = v;
+                    const itm = (frm._last_items || []).find(i => i.seq == seq);
+                    if (itm) {
+                        itm.location = v;
+                        itm.location_found = !!v;
+                        frm.set_value("pdf_data", JSON.stringify(frm._last_items));
+                        frm.dirty();
+                        console.log("WPDF: pdf_data updated for location");
+                    }
                     frm.events.refresh_create_btn(frm, seq);
                 },
                 add_new_label: !loc_found ? __("+ Add New") : null,
@@ -378,11 +496,13 @@ frappe.ui.form.on("Pdf To Sales Order", {
                     localStorage.setItem("wpdf_pending", JSON.stringify({
                         docname: frm.doc.name, type: "warehouse", prefill: { warehouse_name: loc },
                     }));
-                    frappe.ui.form.on("Warehouse", { refresh(f) {
-                        if (!f.is_new()) return;
-                        f.set_value("warehouse_name", loc);
-                        frappe.ui.form.off("Warehouse", "refresh");
-                    }});
+                    frappe.ui.form.on("Warehouse", {
+                        refresh(f) {
+                            if (!f.is_new()) return;
+                            f.set_value("warehouse_name", loc);
+                            frappe.ui.form.off("Warehouse", "refresh");
+                        }
+                    });
                     frappe.set_route("Form", "Warehouse", "new-warehouse-1");
                 } : null,
             });
@@ -390,9 +510,9 @@ frappe.ui.form.on("Pdf To Sales Order", {
             $tr.append($loc_td);
 
             // ── Delivery Date ─────────────────────────────────────────────
-            const $date_td   = $(`<td class="wpdf-col-date"></td>`);
+            const $date_td = $(`<td class="wpdf-col-date"></td>`);
             const $date_ctrl = $(`<div class="wpdf-ctrl"></div>`);
-            const date_ctrl  = make_ctrl({
+            const date_ctrl = make_ctrl({
                 fieldtype: "Date", fieldname: `date_${seq}`,
                 read_only: item.delivery_date ? 1 : 0,
             }, $date_ctrl[0]);
@@ -412,10 +532,10 @@ frappe.ui.form.on("Pdf To Sales Order", {
             $tr.append($date_td);
 
             // ── Qty ───────────────────────────────────────────────────────
-            const has_qty   = item.qty && String(item.qty).trim() !== "";
-            const $qty_td   = $(`<td class="wpdf-col-qty"></td>`);
+            const has_qty = item.qty && String(item.qty).trim() !== "";
+            const $qty_td = $(`<td class="wpdf-col-qty"></td>`);
             const $qty_ctrl = $(`<div class="wpdf-ctrl"></div>`);
-            const qty_ctrl  = make_ctrl({
+            const qty_ctrl = make_ctrl({
                 fieldtype: "Float", fieldname: `qty_${seq}`,
                 read_only: has_qty ? 1 : 0,
             }, $qty_ctrl[0]);
@@ -435,50 +555,6 @@ frappe.ui.form.on("Pdf To Sales Order", {
             $qty_td.append($qty_ctrl);
             $tr.append($qty_td);
 
-            // ── Status ────────────────────────────────────────────────────
-            const $stat_td = $(`<td class="wpdf-col-status"></td>`);
-            if (item.status === "Found") {
-                $stat_td.append(`<span class="indicator-pill green" style="font-size:var(--text-xs);">${__("Found")}</span>`);
-            } else {
-                const safe_code  = (item.item_code || "").replace(/"/g, "&quot;");
-                const safe_desc  = (item.description || item.item_code || "").replace(/"/g, "&quot;");
-                const r          = frm._resolved[seq];
-                const can_create = !!(r.location && r.delivery_date && r.qty);
-
-                const $missing = $(`<div style="margin-bottom:5px;">
-                    <span class="indicator-pill red" style="font-size:var(--text-xs);">${__("Missing")}</span>
-                </div>`);
-
-                const $create_wrap = $(`<div class="wpdf-create-wrap"></div>`);
-                const $btn = $(`
-                    <button class="btn btn-default btn-xs create-item-btn"
-                        data-seq="${seq}"
-                        data-item-code="${safe_code}"
-                        data-description="${safe_desc}"
-                        style="font-size:var(--text-xs);padding:3px 8px;width:100%;white-space:nowrap;"
-                        ${can_create ? "" : "disabled"}>
-                        + ${__("Create Item")}
-                    </button>`);
-
-                if (!can_create) {
-                    const $overlay = $(`<div class="wpdf-disabled-overlay"></div>`);
-                    $overlay.on("click", function (e) {
-                        e.stopPropagation();
-                        const $existing = $create_wrap.find(".wpdf-popover");
-                        if ($existing.length) { $existing.remove(); return; }
-                        $create_wrap.append(frm.events._make_popover(frm, seq));
-                        setTimeout(() => {
-                            $(document).one("click.wpdf_pop", () => $create_wrap.find(".wpdf-popover").remove());
-                        }, 10);
-                    });
-                    $create_wrap.append($overlay);
-                }
-
-                $create_wrap.append($btn);
-                $stat_td.append($missing).append($create_wrap);
-            }
-
-            $tr.append($stat_td);
             $tbody.append($tr);
         });
 
@@ -487,40 +563,8 @@ frappe.ui.form.on("Pdf To Sales Order", {
     },
 
     // Build popover DOM (reused by overlay click and refresh)
-    _make_popover(frm, seq) {
-        const r = frm._resolved[seq] || {};
-        const fields = [
-            { label: __("Location"),      ok: !!r.location },
-            { label: __("Delivery Date"), ok: !!r.delivery_date },
-            { label: __("Qty"),           ok: !!r.qty },
-        ];
-        const rows = fields.map(f => `
-            <div class="wpdf-popover-row">
-                <span class="wpdf-dot ${f.ok ? "wpdf-dot-ok" : ""}"></span>
-                <span style="font-size:var(--text-xs);">${f.label}:&nbsp;${f.ok
-                    ? `<strong style="color:var(--green-500)">✓</strong>`
-                    : `<strong style="color:var(--red-500)">${__("Missing")}</strong>`
-                }</span>
-            </div>`).join("");
-        return $(`<div class="wpdf-popover">
-            <div class="wpdf-popover-title">${__("Complete these first")}</div>
-            ${rows}
-        </div>`);
-    },
-
     refresh_create_btn(frm, seq) {
-        const r   = frm._resolved[seq] || {};
-        const ok  = !!(r.location && r.delivery_date && r.qty);
-        const $td = frm.get_field("item_list").$wrapper.find(`tr[data-seq="${seq}"] .wpdf-col-status`);
-        const $btn = $td.find(".create-item-btn");
-        $btn.prop("disabled", !ok);
-        // Refresh live popover content if open
-        const $pop = $td.find(".wpdf-popover");
-        if ($pop.length) $pop.replaceWith(frm.events._make_popover(frm, seq));
-        if (ok) {
-            $td.find(".wpdf-disabled-overlay").remove();
-            $td.find(".wpdf-popover").remove();
-        }
+        // No-op - Action column removed
     },
 });
 
@@ -559,13 +603,13 @@ frappe.router.on("change", () => {
                     frappe.call({
                         method: "satees.satees.doctype.pdf_to_sales_order.pdf_to_sales_order.handle_so_after_item",
                         args: {
-                            docname:          c.docname,
-                            so_no:            c.so_no,
-                            so_exists:        c.so_exists ? 1 : 0,
-                            item_row:         JSON.stringify(item_row),
-                            customer_id:      c.customer_id   || "",
-                            customer_name:    c.customer_name || "",
-                           
+                            docname: c.docname,
+                            so_no: c.so_no,
+                            so_exists: c.so_exists ? 1 : 0,
+                            item_row: JSON.stringify(item_row),
+                            customer_id: c.customer_id || "",
+                            customer_name: c.customer_name || "",
+
                         },
                         callback(r) {
                             if (r.message && r.message.status === "ok") {
@@ -577,18 +621,18 @@ frappe.router.on("change", () => {
                                 });
                             } else {
                                 frappe.msgprint({
-                                    title:     __("Sales Order Update Failed"),
+                                    title: __("Sales Order Update Failed"),
                                     indicator: "red",
-                                    message:   (r.message && r.message.error) || __("Unknown error occurred"),
+                                    message: (r.message && r.message.error) || __("Unknown error occurred"),
                                 });
                             }
                             frappe.set_route("Form", "Pdf To Sales Order", c.docname);
                         },
                         error(err) {
                             frappe.msgprint({
-                                title:     __("Error"),
+                                title: __("Error"),
                                 indicator: "red",
-                                message:   err.responseJSON && err.responseJSON.exc
+                                message: err.responseJSON && err.responseJSON.exc
                                     ? err.responseJSON.exc
                                     : __("Failed to update Sales Order. Please try again."),
                             });
@@ -609,15 +653,15 @@ frappe.router.on("change", () => {
 // ── Create Item click ─────────────────────────────────────────────────────
 $(document).on("click", ".create-item-btn:not([disabled])", function () {
     if (!cur_frm || cur_frm.doctype !== "Pdf To Sales Order") return;
-    const $btn      = $(this);
-    const seq       = $btn.data("seq");
+    const $btn = $(this);
+    const seq = $btn.data("seq");
     const item_code = $btn.data("item-code");
     const item_desc = $btn.data("description") || item_code;
-    const resolved  = cur_frm._resolved[seq]   || {};
-    const row_data  = (cur_frm._last_items || []).find(i => i.seq == seq) || {};
+    const resolved = cur_frm._resolved[seq] || {};
+    const row_data = (cur_frm._last_items || []).find(i => i.seq == seq) || {};
 
     // so_exists: use live resolved value (updated when user types in plain input)
-    const so_no     = resolved.so_no    || row_data.so_no    || "";
+    const so_no = resolved.so_no || row_data.so_no || "";
     const so_exists = resolved.so_exists !== undefined
         ? resolved.so_exists
         : (row_data.so_exists || false);
@@ -626,21 +670,21 @@ $(document).on("click", ".create-item-btn:not([disabled])", function () {
     const delivery_date = resolved.delivery_date || row_data.delivery_date || "";
 
     localStorage.setItem("wpdf_pending", JSON.stringify({
-        docname:          cur_frm.doc.name,
-        type:             "item",
+        docname: cur_frm.doc.name,
+        type: "item",
         seq,
         so_no,
         so_exists,
         transaction_date: delivery_date,   // used as SO transaction_date in Python
         item_row: {
             item_code,
-            qty:           resolved.qty      || row_data.qty      || 1,
+            qty: resolved.qty || row_data.qty || 1,
             delivery_date: delivery_date,
-            warehouse:     resolved.location || "",
+            warehouse: resolved.location || "",
         },
-        customer_id:   resolved.customer_id   || row_data.customer_id   || "",
-        customer_name: row_data.customer      || "",
-        prefill:       { item_code, item_name: item_desc },
+        customer_id: resolved.customer_id || row_data.customer_id || "",
+        customer_name: row_data.customer || "",
+        prefill: { item_code, item_name: item_desc },
     }));
 
     frappe.ui.form.on("Item", {
