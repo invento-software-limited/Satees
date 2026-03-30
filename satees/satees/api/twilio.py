@@ -3,14 +3,16 @@ import frappe
 import requests
 from twilio.rest import Client
 
-easwari_settings = frappe.get_doc("Easwari Settings")
 
-TWILIO_SID = f"{easwari_settings.twilio_sid}"
-TWILIO_AUTH_TOKEN = f"{easwari_settings.twilio_auth_token}"
-TWILIO_WHATSAPP = f"whatsapp:{easwari_settings.twilio_whatsapp_number}"
 
 @frappe.whitelist(allow_guest=True)
 def receive_pdf():
+    # get twilio settings
+    easwari_settings = frappe.get_doc("Easwari Settings")
+    TWILIO_SID = f"{easwari_settings.twilio_sid}"
+    TWILIO_AUTH_TOKEN = f"{easwari_settings.twilio_auth_token}"
+    TWILIO_WHATSAPP = f"whatsapp:{easwari_settings.twilio_whatsapp_number}"
+
     # Extract payload
     sender = frappe.form_dict.get("From")
     if not sender:
