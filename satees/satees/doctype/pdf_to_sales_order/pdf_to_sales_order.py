@@ -11,198 +11,127 @@ from datetime import datetime
 
 class PdfToSalesOrder(Document):
 	def before_insert(self):
-		
+		self.extract_pdf_data()
+
+	def after_insert(self):
+		"""
+		Automatically create Sales Orders for any valid rows immediately after upload.
+		"""
+		self.create_sales_orders()
+
+	@frappe.whitelist()
+	def get_items(self):
+		"""
+		Public method to trigger extraction manually (e.g. from UI button).
+		"""
+		return self.extract_pdf_data()
+
+	def extract_pdf_data(self):
+		"""
+		Extracts text from PDF, parses into raw orders, and calls map_extracted_data.
+		"""
+		if not self.pdf:
+			return []
+
 		try:
 			file_doc = frappe.get_doc("File", {"file_name": self.pdf.split('/')[-1]})
 			file_path = file_doc.get_full_path()
 			
 			extracted_orders = []
 			current_order = None
-			last_date_time = None  # FIX 3: track across pages safely
+			last_customer = ""
 
 			with pdfplumber.open(file_path) as pdf:
 				for page in pdf.pages:
-					date_time = re.search(r'\d{2}/\d{2}/\d{2}\s*\d{1,2}:\d{2}\s*[AP]M', page.extract_text() or "")
+					# Find date/time for transaction date
+					dt_match = re.search(r'\d{2}/\d{2}/\d{2}\s*\d{1,2}:\d{2}\s*[AP]M', page.extract_text() or "")
+					if dt_match:
+						self.date = datetime.strptime(dt_match.group(), "%d/%m/%y %I:%M %p").date()
 					
-					self.date = datetime.strptime(date_time.group(), "%d/%m/%y %I:%M %p").date()
 					table = page.extract_table()
 					if not table:
 						continue
 					
-					customer = ""
 					for row in table:
-						if not row or not row[0]:  # FIX 1: guard None rows/cells
+						if not row or not row[0]: # safety
 							continue
 						
-						### Sales Order Id Find
+						# New Order? Starts with SO-
 						if str(row[0]).startswith("SO-"):
-							sales_id = str(row[0]).split(" ")
 							if current_order:
 								extracted_orders.append(current_order)
-							if not customer: ## first order row find customer second order not row exit customer use first row customer
-								customer = " ".join(sales_id[1:]) if len(sales_id) > 1 else ""
-							find_customer = frappe.db.get_all(
-								"Customer",
-								filters={"customer_name": ["like", f'%{customer}%']},
-								fields=["name", "customer_name"]
-							)
 							
-							if len(find_customer) == 1:
-								current_order = {
-									"so_no": sales_id[0],
-									"customer": find_customer[0].name,
-									"items": []
-								}
+							parts = str(row[0]).split() # split by any whitespace
+							so_no = parts[0]
+							customer_str = " ".join(parts[1:]).strip() if len(parts) > 1 else ""
+							
+							# Handle multiline customer names across rows
+							if customer_str:
+								last_customer = customer_str
+							else:
+								customer_str = last_customer
 
-						### Item List
-						elif current_order and row[0][0].isdigit():  #  row[0] already checked non-None above
-							item = row[0].split(" ")
-							if len(item) > 5:
-								find_item = frappe.db.get_all(
-									"Item",
-									filters={"name": ["like", f'%{item[1].split('/')[0]}%']},
-									fields=["name", "item_name"]
-								)
-								find_warehouse = frappe.db.get_all(
-									"Warehouse",
-									filters={"name": ["like", f'%{item[-4]}%']},
-									fields=["name"]
-								)
+							current_order = {
+								"so_no": so_no,
+								"customer": customer_str,
+								"items": []
+							}
 
-								if len(find_item) > 0 and len(find_warehouse) > 0:
-									current_order["items"].append({
-										"item_code":find_item[0].name,
-										"warehouse": find_warehouse[0].name,
-										"qty": item[-2],
-										"delivery_date": item[-3]
-									})
+						# Item row? Starts with digit
+						elif current_order and str(row[0])[0].isdigit():
+							item_parts = row[0].split()
+							if len(item_parts) > 5:
+								current_order["items"].append({
+									"item_code":     item_parts[1].split('/')[0],
+									"location":      item_parts[-4],
+									"qty":           item_parts[-2],
+									"delivery_date": item_parts[-3],
+									"description":   " ".join(item_parts[2:-4])
+								})
 
 			if current_order:
 				extracted_orders.append(current_order)
-			
-			if extracted_orders:
-				self.pdf_data = json.dumps(extracted_orders, default=str)
 
-			if len(extracted_orders) > 0:
-				for i in extracted_orders:
-					if len(i.get("items")) > 0:
-						so = frappe.new_doc("Sales Order")
-						so.name = i.get("so_no")
-						so.transaction_date = datetime.strptime(date_time.group(), "%d/%m/%y %I:%M %p").date()
-						so.customer = i.get("customer")
-						for item in i.get("items"):
-							delivery_date = datetime.strptime(item.get("delivery_date"), "%d/%m/%y").date()
-
-							so.append("items", {
-								"item_code": item.get("item_code"),
-								"qty": float(item.get("qty")),
-								"delivery_date": delivery_date,
-								"warehouse": item.get("warehouse")
-							})
-						so.insert(ignore_permissions=True)
-						frappe.db.commit()
+			return self.map_extracted_data(extracted_orders)
 
 		except Exception as e:
-			frappe.log_error(message=frappe.get_traceback(), title="PDF Processing Error")
-			return {"status": "error", "message": str(e)}
-
-
-
-	@frappe.whitelist()
-	def get_items(self):
-		if not self.pdf:
+			frappe.log_error(frappe.get_traceback(), "PDF Extraction Failed")
 			return []
-
-		file_doc = frappe.get_doc("File", {"file_name": self.pdf.split('/')[-1]})
-		file_path = file_doc.get_full_path()
-
-		extracted_orders = []
-		current_order = None
-		last_customer = ""
-
-		with pdfplumber.open(file_path) as pdf:
-			for page in pdf.pages:
-				table = page.extract_table()
-				if not table:
-					continue
-
-				for row in table:
-					if not row or not row[0]:
-						continue
-
-					if str(row[0]).startswith("SO-"):
-						sales_id = str(row[0]).split()  # Use split() to handle multiple spaces
-						if current_order:
-							extracted_orders.append(current_order)
-
-						customer = " ".join(sales_id[1:]).strip() if len(sales_id) > 1 else ""
-						if customer:
-							last_customer = customer
-						else:
-							customer = last_customer
-
-						current_order = {
-							"so_no": sales_id[0],
-							"customer": customer,
-							"items": []
-						}
-
-					elif current_order and str(row[0])[0].isdigit():
-						item = row[0].split()  # Use split()
-						des = item[2:-4]
-						
-						if len(item) > 5:
-							current_order["items"].append({
-								"item_code":     item[1].split('/')[0],
-								"location":      item[-4],
-								"qty":           item[-2],
-								"delivery_date": item[-3],
-								"description": " ".join(des)
-							})
-
-		if current_order:
-			extracted_orders.append(current_order)
-
-		return self.map_extracted_data(extracted_orders)
 
 	@frappe.whitelist()
 	def revalidate_lookups(self):
 		"""
-		Re-run mapping logic based on existing pdf_data without re-extracting PDF.
-		Useful if user created a Customer/Item/Warehouse and wants to update the status.
+		Re-run mapping logic based on existing pdf_data.
 		"""
 		if not self.pdf_data:
 			return self.get_items()
 
 		try:
-			# The stored pdf_data is a list of results. We need to reconstruct
-			# the 'extracted_orders' structure for map_extracted_data.
-			results = json.loads(self.pdf_data)
-			
-			# Group by SO No and Customer
+			data = json.loads(self.pdf_data)
 			orders_map = {}
-			for res in results:
+			for res in data:
 				key = (res['so_no'], res['customer'])
 				if key not in orders_map:
-					orders_map[key] = {
-						"so_no": res['so_no'],
-						"customer": res['customer'],
-						"items": []
-					}
+					orders_map[key] = {"so_no": res['so_no'], "customer": res['customer'], "items": []}
+				
 				orders_map[key]['items'].append({
-					"item_code":     res['item_code'], # This might be the resolved code, but that's fine
+					"item_code":     res['item_code'],
 					"location":      res['raw_location'],
 					"qty":           res['qty'],
 					"delivery_date": res['delivery_date'],
 					"description":   res['description']
 				})
 			
-			extracted_orders = list(orders_map.values())
-			return self.map_extracted_data(extracted_orders)
+			remapped = self.map_extracted_data(list(orders_map.values()))
 			
+			# Ensure DB and local doc are in sync
+			self.pdf_data = json.dumps(remapped, default=str)
+			self.db_set("pdf_data", self.pdf_data)
+			
+			return remapped
 		except Exception as e:
-			frappe.log_error(message=frappe.get_traceback(), title="Revalidation Error")
-			return self.get_items() # fallback to full extraction
+			frappe.log_error(frappe.get_traceback(), "Revalidation Failed")
+			return self.get_items()
 
 	def map_extracted_data(self, extracted_orders):
 		"""
@@ -318,13 +247,22 @@ class PdfToSalesOrder(Document):
 			frappe.throw("No data to process. Please extract PDF first.")
 
 		data = json.loads(self.pdf_data)
-		valid_items = [
-			i for i in data 
-			if i.get("customer_id") and i.get("item_code") and i.get("qty")
-		]
+		# Ensure all required fields are present for processing
+		valid_items = []
+		for i in data:
+			cust_id = i.get("customer_id")
+			item_code = i.get("item_code")
+			warehouse = i.get("location")
+			qty = i.get("qty")
+			
+			if (cust_id and item_code and qty and warehouse and warehouse != "Not Found" and
+				frappe.db.exists("Customer", cust_id) and 
+				frappe.db.exists("Item", item_code) and 
+				frappe.db.exists("Warehouse", warehouse)):
+				valid_items.append(i)
 
 		if not valid_items:
-			frappe.msgprint("No valid rows found to create Sales Orders. Check if Customer and Item Code are resolved for each row.")
+			frappe.msgprint("No valid rows found to create Sales Orders. Ensure Customer, Item Code, and Location (Warehouse) are all resolved for each row.")
 			return
 
 		# Group by (customer_id, so_no)
@@ -349,6 +287,8 @@ class PdfToSalesOrder(Document):
 					so_doc.transaction_date = self.date or frappe.utils.today()
 					if so_no:
 						so_doc.name = so_no
+						so_doc.set("__newname", so_no)
+						so_doc.flags.name_set = True
 					is_new = True
 
 				for itm in items:
@@ -384,94 +324,3 @@ class PdfToSalesOrder(Document):
 
 		return "\n".join(summary)
 
-
-# ── Standalone whitelisted function ──────────────────────────────────────
-@frappe.whitelist()
-def handle_so_after_item(
-	docname, so_no, so_exists, item_row,
-	customer_id="", customer_name=""
-):
-	"""
-	Scenario A: so_exists == 1 → append item to existing Sales Order
-	Scenario B: so_exists == 0 → create new Sales Order with the item
-
-	item_row JSON fields: item_code, qty, delivery_date, warehouse
-	"""
-	import json
-
-	try:
-		row = json.loads(item_row) if isinstance(item_row, str) else item_row
-	except Exception:
-		return {"status": "error", "error": "Invalid item_row JSON"}
-
-
-	item_code    = row.get("item_code")
-	qty          = frappe.utils.flt(row.get("qty") or 1)
-	delivery_date = row.get("delivery_date")
-	warehouse    = row.get("warehouse") or ""
-
-
-	# ── Validate item ────────────────────────────────────────────────────
-	if not frappe.db.exists("Item", item_code):
-		return {"status": "error", "error": f"Item '{item_code}' not found in ERPNext"}
-
-	# ── Scenario A: SO exists → add item ────────────────────────────────
-	if int(so_exists):
-
-		if not frappe.db.exists("Sales Order", so_no):
-			return {"status": "error", "error": f"Sales Order '{so_no}' not found"}
-
-		so_doc = frappe.get_doc("Sales Order", so_no)
-
-
-		# Skip if item already present
-		if item_code in [i.item_code for i in so_doc.items]:
-			return {"status": "ok", "so_exists": True, "so_no": so_no, "note": "Item already in SO"}
-
-		so_doc.append("items", {
-			"item_code":     item_code,
-			"qty":           qty,
-			"delivery_date": datetime.strptime(delivery_date, "%Y-%m-%d").date(),
-			"warehouse":     warehouse,
-		})
-		so_doc.save(ignore_permissions=True)
-		frappe.db.commit()
-		
-		return {"status": "ok", "so_exists": True, "so_no": so_no}
-
-	# ── Scenario B: SO not found → create ───────────────────────────────
-	if not customer_id:
-		found = frappe.db.get_all(
-			"Customer",
-			filters={"customer_name": ["like", f"%{customer_name}%"]},
-			fields=["name"],
-			limit=1,
-		)
-		if not found:
-			return {
-				"status": "error",
-				"error": f"Customer '{customer_name}' not found. Please create the customer first."
-			}
-		customer_id = found[0]["name"]
-	
-	pdf_doc = frappe.get_doc("Pdf To Sales Order", docname)
-	new_so = frappe.get_doc({
-		"doctype":          "Sales Order",
-		"customer":         customer_id,
-		"transaction_date": pdf_doc.date,
-		"delivery_date":    frappe.utils.getdate(delivery_date),
-		"items": [{
-			"item_code":     item_code,
-			"qty":           qty,
-			"delivery_date": frappe.utils.getdate(delivery_date),
-			"warehouse":     warehouse,
-		}],
-	})
-
-	# Try to use the PDF SO number as document name
-	if so_no:
-		new_so.name = so_no
-
-	new_so.insert(ignore_permissions=True)
-	frappe.db.commit()
-	return {"status": "ok", "so_exists": False, "so_no": new_so.name}
