@@ -4,37 +4,71 @@
 
 frappe.ui.form.on("Pdf To Sales Order", {
     refresh(frm) {
-        frm.add_custom_button(__("Refresh Lookups"), () => {
-            frm.call({ method: "revalidate_lookups", doc: frm.doc }).then((r) => {
-                if (r.message) frm.events.render_items_table(frm, r.message);
-            });
-        });
-        frm.add_custom_button(__("Create Sales Orders"), () => {
-            frappe.confirm(__("Create Sales Orders for all valid rows?"), () => {
-                frm.call({ method: "create_sales_orders", doc: frm.doc }).then((r) => {
+        frm.add_custom_button(__("Update Sales Orders"), () => {
+            frappe.confirm(__("Update Sales Orders for all valid rows?"), () => {
+                // Step 1: Re-validate lookups against DB
+                frm.call({ method: "revalidate_lookups", doc: frm.doc }).then((r) => {
                     if (r.message) {
-                        frappe.msgprint({
-                            title: __("Bulk Process Results"),
-                            message: r.message.replace(/\n/g, "<br>"),
-                            indicator: "green"
+                        frm.events.render_items_table(frm, r.message);
+                        // Step 2: Create/Update Sales Orders from updated data
+                        frm.call({ method: "create_sales_orders", doc: frm.doc }).then((r2) => {
+                            if (r2.message) {
+                                frappe.msgprint({
+                                    title: __("Update Results"),
+                                    message: r2.message.replace(/\n/g, "<br>"),
+                                    indicator: "green"
+                                });
+                            }
                         });
                     }
                 });
             });
-        });
+        }, __("Actions"));
+
+        frm.add_custom_button(__("Refresh Lookups"), () => {
+            frm.call({ method: "revalidate_lookups", doc: frm.doc }).then((r) => {
+                if (r.message) frm.events.render_items_table(frm, r.message);
+            });
+        }, __("Actions"));
+
         frm.add_custom_button(__("Reread PDF"), () => {
             frm.trigger("get_items");
-        });
+        }, __("Actions"));
 
         if (frm.doc.pdf_data) {
             try {
                 const items = typeof frm.doc.pdf_data === "string" ? JSON.parse(frm.doc.pdf_data) : frm.doc.pdf_data;
                 if (items && items.length > 0) {
                     frm.events.render_items_table(frm, items);
-                    return;
                 }
             } catch (e) {
                 console.error("Failed to parse pdf_data:", e);
+            }
+        }
+
+        // ── Auto-return logic ─────────────────────────────────────────────
+        const pending = localStorage.getItem("wpdf_pending");
+        if (pending) {
+            const data = JSON.parse(pending);
+            if (data.docname === frm.doc.name) {
+                localStorage.removeItem("wpdf_pending");
+                // Chain the update: Revalidate first, then Create/Update SOs
+                frappe.show_alert({ message: __("Updating Sales Orders..."), indicator: "blue" });
+                
+                frm.call({ method: "revalidate_lookups", doc: frm.doc }).then((r) => {
+                    if (r.message) {
+                        frm.events.render_items_table(frm, r.message);
+                        frm.call({ method: "create_sales_orders", doc: frm.doc }).then((r2) => {
+                            if (r2.message) {
+                                frappe.msgprint({
+                                    title: __("System Updated"),
+                                    message: r2.message.replace(/\n/g, "<br>"),
+                                    indicator: "green"
+                                });
+                            }
+                        });
+                    }
+                });
             }
         }
     },
@@ -392,8 +426,8 @@ frappe.ui.form.on("Pdf To Sales Order", {
             const { $td: $cust_td, ctrl: cust_ctrl } = link_cell({
                 col_class: "wpdf-col-customer",
                 fieldname: `cust_${seq}`, doctype: "Customer",
-                value: item.customer_id || item.customer || "",
-                read_only: item.customer_found,
+                value: item.customer_id || "",
+                read_only: 0,
                 hint: !item.customer_found && item.customer ? item.customer : null,
                 on_change: (v) => {
                     frm._resolved[seq].customer_id = v;
@@ -407,22 +441,39 @@ frappe.ui.form.on("Pdf To Sales Order", {
                     }
                 },
                 add_new_label: !item.customer_found ? __("+ Add New") : null,
-                add_new_click: !item.customer_found ? () => {
+                add_new_click: () => {
+                    const res = frm._resolved[seq] || {};
                     const name = item.customer || "";
                     localStorage.setItem("wpdf_pending", JSON.stringify({
-                        docname: frm.doc.name, type: "customer", prefill: { customer_name: name },
+                        docname: frm.doc.name,
+                        type: "customer",
+                        seq: seq,
+                        so_no: res.so_no,
+                        so_exists: res.so_exists,
+                        customer_id: res.customer_id,
+                        customer_name: name,
+                        item_row: {
+                            item_code: item.item_code || "",
+                            qty: res.qty || item.qty || 1,
+                            delivery_date: res.delivery_date || item.delivery_date || "",
+                            warehouse: res.location || (item.location !== "Not Found" ? item.location : ""),
+                        },
+                        prefill: { customer_name: name },
                     }));
                     frappe.ui.form.on("Customer", {
                         refresh(f) {
                             if (!f.is_new()) return;
                             f.set_value("customer_name", name);
                             frappe.ui.form.off("Customer", "refresh");
+                        },
+                        after_save(f) {
+                            frappe.set_route("Form", "Pdf To Sales Order", frm.doc.name);
+                            frappe.ui.form.off("Customer", "after_save");
                         }
                     });
                     frappe.set_route("Form", "Customer", "new-customer-1");
-                } : null,
+                }
             });
-            if (!item.customer_found) frm._controls[seq].customer = cust_ctrl;
             $tr.append($cust_td);
 
             // ── Item Code ──────────────────────────────────────────────────
@@ -446,11 +497,25 @@ frappe.ui.form.on("Pdf To Sales Order", {
                     frm.events.refresh_create_btn(frm, seq);
                 },
                 add_new_label: !item.item_found ? __("+ Add New") : null,
-                add_new_click: !item.item_found ? () => {
+                add_new_click: () => {
+                    const res = frm._resolved[seq] || {};
                     const code = item.item_code || "";
                     const desc = item.description || "";
                     localStorage.setItem("wpdf_pending", JSON.stringify({
-                        docname: frm.doc.name, type: "item", prefill: { item_code: code, item_name: desc },
+                        docname: frm.doc.name,
+                        type: "item",
+                        seq: seq,
+                        so_no: res.so_no,
+                        so_exists: res.so_exists,
+                        customer_id: res.customer_id,
+                        customer_name: item.customer || "",
+                        item_row: {
+                            item_code: code,
+                            qty: res.qty || item.qty || 1,
+                            delivery_date: res.delivery_date || item.delivery_date || "",
+                            warehouse: res.location || (item.location !== "Not Found" ? item.location : ""),
+                        },
+                        prefill: { item_code: code, item_name: desc },
                     }));
                     frappe.ui.form.on("Item", {
                         refresh(f) {
@@ -458,10 +523,14 @@ frappe.ui.form.on("Pdf To Sales Order", {
                             f.set_value("item_code", code);
                             f.set_value("item_name", desc);
                             frappe.ui.form.off("Item", "refresh");
+                        },
+                        after_save(f) {
+                            frappe.set_route("Form", "Pdf To Sales Order", frm.doc.name);
+                            frappe.ui.form.off("Item", "after_save");
                         }
                     });
                     frappe.set_route("Form", "Item", "new-item-1");
-                } : null,
+                }
             });
             if (!item.item_found) frm._controls[seq].item = item_ctrl;
             $tr.append($item_td);
@@ -491,20 +560,38 @@ frappe.ui.form.on("Pdf To Sales Order", {
                     frm.events.refresh_create_btn(frm, seq);
                 },
                 add_new_label: !loc_found ? __("+ Add New") : null,
-                add_new_click: !loc_found ? () => {
+                add_new_click: () => {
+                    const res = frm._resolved[seq] || {};
                     const loc = item.raw_location || "";
                     localStorage.setItem("wpdf_pending", JSON.stringify({
-                        docname: frm.doc.name, type: "warehouse", prefill: { warehouse_name: loc },
+                        docname: frm.doc.name,
+                        type: "warehouse",
+                        seq: seq,
+                        so_no: res.so_no,
+                        so_exists: res.so_exists,
+                        customer_id: res.customer_id,
+                        customer_name: item.customer || "",
+                        item_row: {
+                            item_code: item.item_code || "",
+                            qty: res.qty || item.qty || 1,
+                            delivery_date: res.delivery_date || item.delivery_date || "",
+                            warehouse: res.location || (item.location !== "Not Found" ? item.location : ""),
+                        },
+                        prefill: { warehouse_name: loc },
                     }));
                     frappe.ui.form.on("Warehouse", {
                         refresh(f) {
                             if (!f.is_new()) return;
                             f.set_value("warehouse_name", loc);
                             frappe.ui.form.off("Warehouse", "refresh");
+                        },
+                        after_save(f) {
+                            frappe.set_route("Form", "Pdf To Sales Order", frm.doc.name);
+                            frappe.ui.form.off("Warehouse", "after_save");
                         }
                     });
                     frappe.set_route("Form", "Warehouse", "new-warehouse-1");
-                } : null,
+                }
             });
             if (!loc_found) frm._controls[seq].location = loc_ctrl;
             $tr.append($loc_td);
@@ -569,85 +656,7 @@ frappe.ui.form.on("Pdf To Sales Order", {
 });
 
 
-// ── Router ────────────────────────────────────────────────────────────────
-frappe.router.on("change", () => {
-    const pending = localStorage.getItem("wpdf_pending");
-    if (!pending) return;
-    let ctx;
-    try { ctx = JSON.parse(pending); } catch (e) { return; }
-    const route = frappe.get_route();
-    if (!route) return;
 
-    if (route[0] === "Form" && route[1] === "Pdf To Sales Order" && route[2] === ctx.docname) {
-        localStorage.removeItem("wpdf_pending");
-        setTimeout(() => {
-            if (cur_frm && cur_frm.doctype === "Pdf To Sales Order") cur_frm.trigger("get_items");
-        }, 600);
-        return;
-    }
-
-    if (route[0] === "Form" && ["Customer", "Item", "Warehouse"].includes(route[1])) {
-        const doctype = route[1];
-        frappe.ui.form.on(doctype, {
-            after_save(inner_frm) {
-                const still = localStorage.getItem("wpdf_pending");
-                if (!still) return;
-                let c;
-                try { c = JSON.parse(still); } catch (e) { return; }
-                if (inner_frm.is_new() || inner_frm.doc.__unsaved === 1) return;
-
-                if (doctype === "Item" && c.type === "item") {
-                    const item_row = Object.assign({}, c.item_row || {}, { item_code: inner_frm.doc.name });
-                    localStorage.removeItem("wpdf_pending");
-                    frappe.show_alert({ message: __("Item created. Updating Sales Order…"), indicator: "blue" });
-                    frappe.call({
-                        method: "satees.satees.doctype.pdf_to_sales_order.pdf_to_sales_order.handle_so_after_item",
-                        args: {
-                            docname: c.docname,
-                            so_no: c.so_no,
-                            so_exists: c.so_exists ? 1 : 0,
-                            item_row: JSON.stringify(item_row),
-                            customer_id: c.customer_id || "",
-                            customer_name: c.customer_name || "",
-
-                        },
-                        callback(r) {
-                            if (r.message && r.message.status === "ok") {
-                                frappe.show_alert({
-                                    message: r.message.so_exists
-                                        ? __("Item added to ") + r.message.so_no
-                                        : __("Sales Order created: ") + r.message.so_no,
-                                    indicator: "green",
-                                });
-                            } else {
-                                frappe.msgprint({
-                                    title: __("Sales Order Update Failed"),
-                                    indicator: "red",
-                                    message: (r.message && r.message.error) || __("Unknown error occurred"),
-                                });
-                            }
-                            frappe.set_route("Form", "Pdf To Sales Order", c.docname);
-                        },
-                        error(err) {
-                            frappe.msgprint({
-                                title: __("Error"),
-                                indicator: "red",
-                                message: err.responseJSON && err.responseJSON.exc
-                                    ? err.responseJSON.exc
-                                    : __("Failed to update Sales Order. Please try again."),
-                            });
-                            frappe.set_route("Form", "Pdf To Sales Order", c.docname);
-                        },
-                    });
-                } else {
-                    localStorage.removeItem("wpdf_pending");
-                    frappe.show_alert({ message: __("Returning to PDF form…"), indicator: "blue" });
-                    frappe.set_route("Form", "Pdf To Sales Order", c.docname);
-                }
-            },
-        });
-    }
-});
 
 
 // ── Create Item click ─────────────────────────────────────────────────────
