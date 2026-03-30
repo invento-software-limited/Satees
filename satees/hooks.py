@@ -44,6 +44,9 @@ add_to_apps_screen = [
 
 # include js in doctype views
 # doctype_js = {"doctype" : "public/js/doctype.js"}
+doctype_js = {
+	"Production Plan" : "/public/js/production_plan.js"
+}
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
@@ -141,7 +144,14 @@ doc_events = {
     "Twilio Whatsapp Message Log":{
         "before_insert": "satees.method.doc_events.twilio_whatsapp_msg_log.before_insert"
     }
+	# "Production Plan":{
+	# 	"on_submit": "satees.method.doc_events.production_plan.on_submit"
+	# }
 }
+
+# override_doctype_class = {
+#     "Production Plan": "satees.method.doc_events.production_plan.CustomProductionPlan"
+# }
 
 # Scheduled Tasks
 # ---------------
