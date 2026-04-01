@@ -10,12 +10,12 @@ frappe.ui.form.on("PDF to Purchase Receipt", {
 	},
 
 	get_items(frm) {
-		console.log("get_items triggered. Field value:", frm.doc.supplier_delivery_pdf);
+		
 		if (!frm.doc.supplier_delivery_pdf) return;
 
 		frappe.show_alert({ message: __("Parsing PDF..."), indicator: "blue" });
 		frm.call({ method: "get_items", doc: frm.doc }).then((r) => {
-			console.log("get_items response:", r.message);
+			
 			if (r.message && r.message.length > 0) {
 				frm.events.render_items_table(frm, r.message);
 			} else {

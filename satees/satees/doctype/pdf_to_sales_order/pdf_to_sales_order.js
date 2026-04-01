@@ -42,7 +42,7 @@ frappe.ui.form.on("Pdf To Sales Order", {
                     frm.events.render_items_table(frm, items);
                 }
             } catch (e) {
-                console.error("Failed to parse pdf_data:", e);
+                console.error("Failed to parse pdf_data:");
             }
         }
 
@@ -484,7 +484,7 @@ frappe.ui.form.on("Pdf To Sales Order", {
                 read_only: item.item_found,
                 hint: !item.item_found && item.item_code ? item.item_code : null,
                 on_change: (v) => {
-                    console.log("WPDF: Item on_change callback:", v);
+                  
                     frm._resolved[seq].item_code = v;
                     const itm = (frm._last_items || []).find(i => i.seq == seq);
                     if (itm) {
@@ -492,7 +492,7 @@ frappe.ui.form.on("Pdf To Sales Order", {
                         itm.item_found = !!v;
                         frm.set_value("pdf_data", JSON.stringify(frm._last_items));
                         frm.dirty();
-                        console.log("WPDF: pdf_data updated for item");
+                      
                     }
                     frm.events.refresh_create_btn(frm, seq);
                 },
@@ -547,7 +547,6 @@ frappe.ui.form.on("Pdf To Sales Order", {
                 read_only: loc_found,
                 hint: !loc_found && item.raw_location ? item.raw_location : null,
                 on_change: (v) => {
-                    console.log("WPDF: Location on_change callback:", v);
                     frm._resolved[seq].location = v;
                     const itm = (frm._last_items || []).find(i => i.seq == seq);
                     if (itm) {
@@ -556,7 +555,7 @@ frappe.ui.form.on("Pdf To Sales Order", {
                         itm.raw_location = v; // Synchronize raw_location for revalidation stability
                         frm.set_value("pdf_data", JSON.stringify(frm._last_items));
                         frm.dirty();
-                        console.log("WPDF: pdf_data updated for location");
+                       
                     }
                     frm.events.refresh_create_btn(frm, seq);
                 },
