@@ -706,3 +706,4 @@ $(document).on("click", ".create-item-btn:not([disabled])", function () {
     });
     frappe.set_route("Form", "Item", "new-item-1");
 });
+
