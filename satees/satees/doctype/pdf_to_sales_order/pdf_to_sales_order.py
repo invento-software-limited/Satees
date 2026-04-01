@@ -250,16 +250,18 @@ class PdfToSalesOrder(Document):
 				status_data.setdefault("Found Items", 0)
 				status_data["Found Items"] += 1
 		
-		print(status_data.get("Missing Items", 0), "items are missing")
+		
 		if len(pdf_data_list)  == status_data.get("Missing Items", 0):
-			self.status = "Not Started (Pending)"
+			self.status = "Pending"
 		elif len(pdf_data_list)  == status_data.get("Found Items", 0):
-			self.status = "Fully Completed"
+			self.status = "Completed"
 		else:
-			self.status = "Partially Completed"
+			self.status = "Partially Processed"
 		
 		self.db_set("status", self.status)
 		return result
+	
+	
 
 	@frappe.whitelist()
 	def create_sales_orders(self):

@@ -8,6 +8,8 @@
   "supplier_delivery_pdf",
   "date",
   "purchase_receipt",
+  "status",
+  "posting_date",
   "section_break_eomq",
   "item_list"
  ],
@@ -31,7 +33,9 @@
    "default": "Today",
    "fieldname": "date",
    "fieldtype": "Date",
-   "label": "Date"
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Invoice Receipt Date"
   },
   {
    "fieldname": "purchase_receipt",
@@ -39,12 +43,31 @@
    "label": "Purchase Receipt",
    "options": "Purchase Receipt",
    "read_only": 1
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "hidden": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Pending\nPartially Processed\nCompleted"
+  },
+  {
+   "default": "Today",
+   "fieldname": "posting_date",
+   "fieldtype": "Date",
+   "hidden": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Posting Date",
+   "read_only": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-03-19 15:46:58.909854",
+ "modified": "2026-04-01 12:24:16.185164",
  "modified_by": "Administrator",
  "module": "Satees",
  "name": "PDF to Purchase Receipt",
