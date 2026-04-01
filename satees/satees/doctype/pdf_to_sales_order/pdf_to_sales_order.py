@@ -239,6 +239,26 @@ class PdfToSalesOrder(Document):
 		self.pdf_data = json.dumps(result, default=str)
 		# Clear the save indicator so the user can see it updated the field
 		self.db_set("pdf_data", self.pdf_data)
+
+		status_data = {}
+		pdf_data_list = json.loads(self.pdf_data)
+		for i in pdf_data_list:
+			if i.get("status") == "Missing":
+				status_data.setdefault("Missing Items", 0)
+				status_data["Missing Items"] += 1
+			else:
+				status_data.setdefault("Found Items", 0)
+				status_data["Found Items"] += 1
+		
+		print(status_data.get("Missing Items", 0), "items are missing")
+		if len(pdf_data_list)  == status_data.get("Missing Items", 0):
+			self.status = "Not Started (Pending)"
+		elif len(pdf_data_list)  == status_data.get("Found Items", 0):
+			self.status = "Fully Completed"
+		else:
+			self.status = "Partially Completed"
+		
+		self.db_set("status", self.status)
 		return result
 
 	@frappe.whitelist()
@@ -323,4 +343,5 @@ class PdfToSalesOrder(Document):
 				summary.append(f"Error processing {so_no or 'New SO'} for {cust_id}: {str(e)}")
 
 		return "\n".join(summary)
+
 
