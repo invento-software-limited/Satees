@@ -309,6 +309,23 @@ class PDFtoPurchaseReceipt(Document):
 				self.purchase_receipt = pr_to_save_on_doc
 				self.save()
 				frappe.db.commit()
+			
+			status_data = {}
+			for i in result:
+				if i.get("status") == "Not Found":
+					status_data.setdefault("Missing Items", 0)
+					status_data["Missing Items"] += 1
+				else:
+					status_data.setdefault("Found Items", 0)
+					status_data["Found Items"] += 1
+
+			if len(result) == status_data.get("Missing Items", 0):
+				self.status = "Pending"
+			elif len(result) == status_data.get("Found Items", 0):
+				self.status = "Completed"
+			else:
+				self.status = "Partially Processed"
+			self.db_set("status", self.status)
 
 			return result
 
