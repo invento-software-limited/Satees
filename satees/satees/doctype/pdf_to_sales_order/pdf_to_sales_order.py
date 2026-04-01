@@ -114,9 +114,14 @@ class PdfToSalesOrder(Document):
 				if key not in orders_map:
 					orders_map[key] = {"so_no": res['so_no'], "customer": res['customer'], "items": []}
 				
+				# Use resolved location if it exists, otherwise fall back to raw_location
+				loc_to_use = res.get('location')
+				if not loc_to_use or loc_to_use == "Not Found":
+					loc_to_use = res.get('raw_location')
+
 				orders_map[key]['items'].append({
 					"item_code":     res['item_code'],
-					"location":      res['raw_location'],
+					"location":      loc_to_use,
 					"qty":           res['qty'],
 					"delivery_date": res['delivery_date'],
 					"description":   res['description']

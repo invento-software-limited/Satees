@@ -222,13 +222,16 @@ class PDFtoPurchaseReceipt(Document):
 				for itm in items:
 					item_code = itm.get("item_code")
 					batch_no = itm.get("batch", "")
+					uom = itm.get("uom", "")
 					
 					# Refined lookup: exact match first
 					if frappe.db.exists("Item", item_code):
 						itm["status"] = "Found"
-						# Auto-create Batch if present in PDF and not yet in system
+						# Auto-create Batch and UOM if present in PDF and not yet in system
 						if batch_no:
 							_ensure_batch(item_code, batch_no)
+						if uom:
+							_ensure_uom(uom)
 						found_items.append(itm)
 					# Fallback: check before "/" if not found
 					elif "/" in item_code:
@@ -238,6 +241,8 @@ class PDFtoPurchaseReceipt(Document):
 							itm["status"] = "Found"
 							if batch_no:
 								_ensure_batch(base_code, batch_no)
+							if uom:
+								_ensure_uom(uom)
 							found_items.append(itm)
 						else:
 							itm["status"] = "Not Found"
@@ -316,6 +321,18 @@ def _ensure_batch(item_code, batch_no):
 	"""Create a Batch record for item_code if it doesn't already exist."""
 	if not batch_no:
 		return
+	
+	# Enable Item Batch Tracking if disabled
+	try:
+		item_doc = frappe.get_doc("Item", item_code)
+		if not item_doc.has_batch_no:
+			item_doc.has_batch_no = 1
+			item_doc.save(ignore_permissions=True)
+			frappe.db.commit()
+	except Exception:
+		# Log but don't fail the whole operation
+		frappe.log_error(message=frappe.get_traceback(), title=f"Error enabling batch for Item {item_code}")
+
 	if not frappe.db.exists("Batch", {"batch_id": batch_no, "item": item_code}):
 		try:
 			batch_doc = frappe.new_doc("Batch")
@@ -328,23 +345,39 @@ def _ensure_batch(item_code, batch_no):
 			frappe.log_error(message=frappe.get_traceback(), title=f"Batch Create Error: {batch_no} / {item_code}")
 
 
+def _ensure_uom(uom_name):
+	"""Create a UOM record if it doesn't already exist."""
+	if not uom_name:
+		return
+	if not frappe.db.exists("UOM", uom_name):
+		try:
+			uom_doc = frappe.new_doc("UOM")
+			uom_doc.uom_name = uom_name
+			uom_doc.insert(ignore_permissions=True)
+			frappe.db.commit()
+		except Exception:
+			# Log but don't fail the whole operation
+			frappe.log_error(message=frappe.get_traceback(), title=f"UOM Create Error: {uom_name}")
+
+
 @frappe.whitelist()
 def handle_pr_after_item(docname, do_no, item_row, supplier_name="", batch_no=""):
 	import json
 	try:
 		row = json.loads(item_row) if isinstance(item_row, str) else item_row
 		item_code = row.get("item_code")
+		uom = row.get("uom")
 
 		if not frappe.db.exists("Item", item_code):
 			return {"status": "error", "error": f"Item '{item_code}' not found."}
 
-		# Create Batch for the newly created item if batch_no was in the PDF
+		# Ensure Batch and UOM for newly created item
 		if batch_no:
 			_ensure_batch(item_code, batch_no)
+		if uom:
+			_ensure_uom(uom)
 
-		# Re-run full get_items() on the PDF doc — this re-parses the PDF,
-		# finds ALL items (including the one just created), and upserts all
-		# of them into the Purchase Receipt using the item+batch combo check.
+		# Re-run full get_items()
 		parent_doc = frappe.get_doc("PDF to Purchase Receipt", docname)
 		result = parent_doc.get_items()
 

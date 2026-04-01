@@ -553,6 +553,7 @@ frappe.ui.form.on("Pdf To Sales Order", {
                     if (itm) {
                         itm.location = v;
                         itm.location_found = !!v;
+                        itm.raw_location = v; // Synchronize raw_location for revalidation stability
                         frm.set_value("pdf_data", JSON.stringify(frm._last_items));
                         frm.dirty();
                         console.log("WPDF: pdf_data updated for location");
