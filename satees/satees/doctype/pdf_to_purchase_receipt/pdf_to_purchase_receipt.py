@@ -2,10 +2,16 @@ import frappe
 from frappe.model.document import Document
 import pdfplumber
 import re
+import json
 from datetime import datetime
 
 
 class PDFtoPurchaseReceipt(Document):
+	def before_save(self):
+		self.flags.is_backend_save = True
+		if self.has_value_changed("supplier_delivery_pdf") or (not getattr(self, "pdf_data", None) and self.supplier_delivery_pdf):
+			self.extract_pdf_data()
+
 	def _get_extracted_data(self):
 		file_doc = frappe.get_all("File", filters={"file_url": self.supplier_delivery_pdf}, limit=1)
 		if not file_doc:
@@ -24,6 +30,23 @@ class PDFtoPurchaseReceipt(Document):
 				do_match = re.search(r"DO-[\d/]+", text)
 				if do_match:
 					do_no = do_match.group()
+
+				# Extract Date
+				if not getattr(self, "date", None):
+					date_match = re.search(r'(?i)Date\s*[:]\s*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})', text)
+					if date_match:
+						date_str = date_match.group(1).replace('-', '/')
+						try:
+							if len(date_str.split('/')[-1]) == 2:
+								self.date = datetime.strptime(date_str, "%d/%m/%y").date()
+							else:
+								self.date = datetime.strptime(date_str, "%d/%m/%Y").date()
+						except ValueError:
+							pass
+					else:
+						dt_match = re.search(r'\d{2}/\d{2}/\d{2}\s*\d{1,2}:\d{2}\s*[AP]M', text)
+						if dt_match:
+							self.date = datetime.strptime(dt_match.group(), "%d/%m/%y %I:%M %p").date()
 
 				# Extract supplier name dynamically (usually the first line below the top header)
 				supplier_raw = ""
@@ -166,7 +189,7 @@ class PDFtoPurchaseReceipt(Document):
 		return extracted_receipts
 
 	@frappe.whitelist()
-	def get_items(self):
+	def extract_pdf_data(self):
 		try:
 			if not self.supplier_delivery_pdf:
 				return []
@@ -282,7 +305,6 @@ class PDFtoPurchaseReceipt(Document):
 						else:
 							pr.save(ignore_permissions=True)
 						
-						frappe.db.commit()
 						pr_name = pr.name
 						
 						if not pr_to_save_on_doc:
@@ -307,8 +329,8 @@ class PDFtoPurchaseReceipt(Document):
 
 			if pr_to_save_on_doc and pr_to_save_on_doc != self.purchase_receipt:
 				self.purchase_receipt = pr_to_save_on_doc
-				self.save()
-				frappe.db.commit()
+				if not self.flags.is_backend_save:
+					self.save(ignore_permissions=True)
 			
 			status_data = {}
 			for i in result:
@@ -319,13 +341,18 @@ class PDFtoPurchaseReceipt(Document):
 					status_data.setdefault("Found Items", 0)
 					status_data["Found Items"] += 1
 
-			if len(result) == status_data.get("Missing Items", 0):
+			if len(result) > 0 and len(result) == status_data.get("Missing Items", 0):
 				self.status = "Pending"
-			elif len(result) == status_data.get("Found Items", 0):
+			elif len(result) > 0 and len(result) == status_data.get("Found Items", 0):
 				self.status = "Completed"
 			else:
 				self.status = "Partially Processed"
-			self.db_set("status", self.status)
+
+			self.pdf_data = json.dumps(result, default=str)
+
+			if not self.flags.is_backend_save:
+				self.db_set("status", self.status)
+				self.db_set("pdf_data", self.pdf_data)
 
 			return result
 
@@ -345,7 +372,6 @@ def _ensure_batch(item_code, batch_no):
 		if not item_doc.has_batch_no:
 			item_doc.has_batch_no = 1
 			item_doc.save(ignore_permissions=True)
-			frappe.db.commit()
 	except Exception:
 		# Log but don't fail the whole operation
 		frappe.log_error(message=frappe.get_traceback(), title=f"Error enabling batch for Item {item_code}")
@@ -356,7 +382,6 @@ def _ensure_batch(item_code, batch_no):
 			batch_doc.batch_id = batch_no
 			batch_doc.item = item_code
 			batch_doc.insert(ignore_permissions=True)
-			frappe.db.commit()
 		except Exception:
 			# Log but don't fail the whole operation
 			frappe.log_error(message=frappe.get_traceback(), title=f"Batch Create Error: {batch_no} / {item_code}")
@@ -371,7 +396,6 @@ def _ensure_uom(uom_name):
 			uom_doc = frappe.new_doc("UOM")
 			uom_doc.uom_name = uom_name
 			uom_doc.insert(ignore_permissions=True)
-			frappe.db.commit()
 		except Exception:
 			# Log but don't fail the whole operation
 			frappe.log_error(message=frappe.get_traceback(), title=f"UOM Create Error: {uom_name}")
@@ -396,7 +420,8 @@ def handle_pr_after_item(docname, do_no, item_row, supplier_name="", batch_no=""
 
 		# Re-run full get_items()
 		parent_doc = frappe.get_doc("PDF to Purchase Receipt", docname)
-		result = parent_doc.get_items()
+		result = parent_doc.extract_pdf_data()
+		parent_doc.save(ignore_permissions=True)
 
 		pr_name = ""
 		if result:
