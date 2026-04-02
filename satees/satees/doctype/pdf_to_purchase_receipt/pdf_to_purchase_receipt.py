@@ -327,38 +327,144 @@ class PDFtoPurchaseReceipt(Document):
 						"supplier_status": "Found" if supplier_id else "Not Found"
 					})
 
+			self.pdf_data = json.dumps(result, default=str)
+			self.sync_pr()
+			return result
+
+		except Exception:
+			frappe.log_error(message=frappe.get_traceback(), title="PDF extract_pdf_data Error")
+			return []
+
+	@frappe.whitelist()
+	def sync_pr(self):
+		"""Update Purchase Receipt(s) based on the current pdf_data JSON."""
+		try:
+			if not self.pdf_data:
+				return
+
+			import json
+			try:
+				items_from_json = json.loads(self.pdf_data)
+			except Exception:
+				return
+
+			# Group items by DO Number and Supplier
+			grouped_by_do = {}
+			for item in items_from_json:
+				do_no = item.get("do_no") or "NO-DO"
+				if do_no not in grouped_by_do:
+					grouped_by_do[do_no] = {
+						"supplier_name": item.get("supplier"),
+						"items": []
+					}
+				grouped_by_do[do_no]["items"].append(item)
+
+			pr_to_save_on_doc = ""
+
+			for do_no, data in grouped_by_do.items():
+				supplier_name = data["supplier_name"]
+				items = data["items"]
+
+				# Find Supplier
+				supplier_id = ""
+				if supplier_name:
+					find_supplier = frappe.db.get_all(
+						"Supplier",
+						filters={"supplier_name": ["like", f"%{supplier_name}%"]},
+						fields=["name"],
+						limit=1
+					)
+					if find_supplier:
+						supplier_id = find_supplier[0].name
+
+				found_items = [i for i in items if i.get("status") == "Found"]
+				
+				if found_items and supplier_id:
+					pr_name = items[0].get("pr_name")
+					
+					# Verify pr_name exists, otherwise check DO NO fallback
+					if pr_name and not frappe.db.exists("Purchase Receipt", pr_name):
+						pr_name = ""
+					if not pr_name and do_no != "NO-DO" and frappe.db.exists("Purchase Receipt", do_no):
+						pr_name = do_no
+
+					if pr_name:
+						pr = frappe.get_doc("Purchase Receipt", pr_name)
+					else:
+						pr = frappe.new_doc("Purchase Receipt")
+						if do_no != "NO-DO":
+							pr.name = do_no
+						pr.supplier = supplier_id
+						pr.posting_date = self.date or datetime.today().date()
+
+					needs_save = False
+					existing_combos = {
+						(i.item_code, i.uom, float(i.qty), i.batch_no or "") for i in pr.items
+					}
+					for f_itm in found_items:
+						item_code = f_itm.get("item_code")
+						uom = f_itm.get("uom") or ""
+						qty = float(f_itm.get("qty") or 0)
+						batch_no = f_itm.get("batch") or ""
+						
+						combo = (item_code, uom, qty, batch_no)
+						if combo not in existing_combos:
+							# Ensure Match/Batch/UOM
+							if batch_no:
+								_ensure_batch(item_code, batch_no)
+							if uom:
+								_ensure_uom(uom)
+
+							pr.append("items", {
+								"item_code": item_code,
+								"qty": qty,
+								"uom": uom,
+								"batch_no": batch_no,
+								"schedule_date": pr.posting_date
+							})
+							needs_save = True
+
+					if needs_save or pr.get("__islocal"):
+						if pr.get("__islocal"):
+							pr.insert(ignore_permissions=True)
+						else:
+							pr.save(ignore_permissions=True)
+						
+						# Update pr_name in our internal data if it was missing
+						if not pr_to_save_on_doc:
+							pr_to_save_on_doc = pr.name
+						
+						# Update the JSON items with the (potentially new) PR name
+						for itm in items:
+							itm["pr_name"] = pr.name
+
+			# Finalize updates to self
 			if pr_to_save_on_doc and pr_to_save_on_doc != self.purchase_receipt:
 				self.purchase_receipt = pr_to_save_on_doc
-				if not self.flags.is_backend_save:
-					self.save(ignore_permissions=True)
+
+			# Update status and pdf_data
+			status_data = {"Found Items": 0, "Missing Items": 0}
+			for item in items_from_json:
+				key = "Found Items" if item.get("status") == "Found" else "Missing Items"
+				status_data[key] += 1
 			
-			status_data = {}
-			for i in result:
-				if i.get("status") == "Not Found":
-					status_data.setdefault("Missing Items", 0)
-					status_data["Missing Items"] += 1
+			if len(items_from_json) > 0:
+				if status_data["Missing Items"] == len(items_from_json):
+					self.status = "Pending"
+				elif status_data["Found Items"] == len(items_from_json):
+					self.status = "Completed"
 				else:
-					status_data.setdefault("Found Items", 0)
-					status_data["Found Items"] += 1
+					self.status = "Partially Processed"
 
-			if len(result) > 0 and len(result) == status_data.get("Missing Items", 0):
-				self.status = "Pending"
-			elif len(result) > 0 and len(result) == status_data.get("Found Items", 0):
-				self.status = "Completed"
-			else:
-				self.status = "Partially Processed"
-
-			self.pdf_data = json.dumps(result, default=str)
+			self.pdf_data = json.dumps(items_from_json, default=str)
 
 			if not self.flags.is_backend_save:
 				self.db_set("status", self.status)
 				self.db_set("pdf_data", self.pdf_data)
-
-			return result
-
+				self.db_set("purchase_receipt", self.purchase_receipt)
+		
 		except Exception:
-			frappe.log_error(message=frappe.get_traceback(), title="PDF get_items Error")
-			return []
+			frappe.log_error(message=frappe.get_traceback(), title="PDF sync_pr Error")
 
 
 def _ensure_batch(item_code, batch_no):
@@ -402,32 +508,66 @@ def _ensure_uom(uom_name):
 
 
 @frappe.whitelist()
-def handle_pr_after_item(docname, do_no, item_row, supplier_name="", batch_no=""):
+def handle_pr_after_item(docname, do_no, item_row, supplier_name="", batch_no="", old_item_code=""):
 	import json
 	try:
 		row = json.loads(item_row) if isinstance(item_row, str) else item_row
-		item_code = row.get("item_code")
+		item_code = row.get("item_code")  # New item code
 		uom = row.get("uom")
 
-		if not frappe.db.exists("Item", item_code):
-			return {"status": "error", "error": f"Item '{item_code}' not found."}
-
-		# Ensure Batch and UOM for newly created item
-		if batch_no:
-			_ensure_batch(item_code, batch_no)
-		if uom:
-			_ensure_uom(uom)
-
-		# Re-run full get_items()
 		parent_doc = frappe.get_doc("PDF to Purchase Receipt", docname)
-		result = parent_doc.extract_pdf_data()
-		parent_doc.save(ignore_permissions=True)
+		if not parent_doc.pdf_data:
+			return {"status": "error", "error": "No PDF data found to update."}
 
-		pr_name = ""
-		if result:
-			pr_name = result[0].get("pr_name", "")
+		data = json.loads(parent_doc.pdf_data)
+		item_updated = False
+		
+		for d in data:
+			# Match by DO and old item code if possible
+			match_do = (not do_no) or (d.get("do_no") == do_no)
+			match_code = (not old_item_code) or (d.get("item_code") == old_item_code)
+			
+			if match_do and match_code and d.get("status") != "Found":
+				d["item_code"] = item_code
+				d["status"] = "Found"
+				item_updated = True
+				break
 
-		return {"status": "ok", "pr_name": pr_name}
+		if item_updated:
+			parent_doc.pdf_data = json.dumps(data, default=str)
+			parent_doc.sync_pr() # This will update/create the Purchase Receipt
+			parent_doc.save(ignore_permissions=True)
+
+		return {"status": "ok", "pr_name": parent_doc.purchase_receipt}
 
 	except Exception as e:
+		frappe.log_error(message=frappe.get_traceback(), title="PDF handle_pr_after_item Error")
+		return {"status": "error", "error": str(e)}
+
+
+@frappe.whitelist()
+def handle_pr_after_supplier(docname, supplier_name):
+	import json
+	try:
+		parent_doc = frappe.get_doc("PDF to Purchase Receipt", docname)
+		if not parent_doc.pdf_data:
+			return {"status": "error", "error": "No PDF data found to update."}
+
+		data = json.loads(parent_doc.pdf_data)
+		updated = False
+		
+		for d in data:
+			if d.get("supplier") == supplier_name:
+				d["supplier_status"] = "Found"
+				updated = True
+
+		if updated:
+			parent_doc.pdf_data = json.dumps(data, default=str)
+			parent_doc.sync_pr()
+			parent_doc.save(ignore_permissions=True)
+
+		return {"status": "ok", "pr_name": parent_doc.purchase_receipt}
+
+	except Exception as e:
+		frappe.log_error(message=frappe.get_traceback(), title="PDF handle_pr_after_supplier Error")
 		return {"status": "error", "error": str(e)}

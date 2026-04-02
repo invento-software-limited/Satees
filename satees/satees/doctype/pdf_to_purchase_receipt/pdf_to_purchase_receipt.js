@@ -137,6 +137,12 @@ frappe.ui.form.on("PDF to Purchase Receipt", {
 					<td style="text-align:center;">
 						<span class="status-pill ${status_class}">${__(item.status)}</span>
 						${create_btn}
+						<button class="btn btn-xs btn-default wpr-link-btn"
+							style="margin-top: 5px; display: block; width: 100%; color: var(--text-muted); border-color: var(--border-color);"
+							data-no="${item.no || ""}"
+							data-item-code="${(item.item_code || "").replace(/"/g, "&quot;")}">
+							${__("Link Item")}
+						</button>
 					</td>
 				</tr>
 			`);
@@ -202,6 +208,48 @@ frappe.ui.form.on("PDF to Purchase Receipt", {
 			});
 			frappe.set_route("Form", "Supplier", "new-supplier-1");
 		});
+
+		// Handle Link Item button
+		$wrap.on("click", ".wpr-link-btn", function() {
+			const $btn = $(this);
+			const item_no = $btn.data("no");
+
+			frappe.prompt([
+				{
+					label: __("Select Existing Item"),
+					fieldname: "item_code",
+					fieldtype: "Link",
+					options: "Item",
+					reqd: 1
+				}
+			], (values) => {
+				if (frm.doc.pdf_data) {
+					try {
+						let data = JSON.parse(frm.doc.pdf_data);
+						let item_updated = false;
+						data.forEach(d => {
+							if (String(d.no) === String(item_no)) {
+								d.item_code = values.item_code;
+								d.status = "Found";
+								item_updated = true;
+							}
+						});
+						if (item_updated) {
+							frm.set_value("pdf_data", JSON.stringify(data));
+							frm.trigger("render_items_table", data);
+							
+							frappe.show_alert({ message: __("Linking item and updating Purchase Receipt..."), indicator: "blue" });
+							frm.call("sync_pr").then(() => {
+								frappe.show_alert({ message: __("Purchase Receipt synchronized."), indicator: "green" });
+								frm.reload_doc();
+							});
+						}
+					} catch(e) {
+						console.error("Failed to update item link:", e);
+					}
+				}
+			}, __("Link Item to System"), __("Link"));
+		});
 	}
 });
 
@@ -220,7 +268,7 @@ frappe.router.on("change", () => {
 			localStorage.removeItem("wpr_pending");
 			setTimeout(() => {
 				if (cur_frm && cur_frm.doctype === "PDF to Purchase Receipt") {
-					cur_frm.trigger("get_items");
+					cur_frm.reload_doc();
 				}
 			}, 600);
 			return;
@@ -237,8 +285,18 @@ frappe.router.on("change", () => {
 			localStorage.removeItem("wpr_pending_supplier");
 			setTimeout(() => {
 				if (cur_frm && cur_frm.doctype === "PDF to Purchase Receipt") {
-					// Trigger backend refresh to find the new supplier and link PR
-					cur_frm.trigger("get_items");
+					frappe.show_alert({ message: __("Updating supplier status and synchronizing..."), indicator: "blue" });
+					frappe.call({
+						method: "satees.satees.doctype.pdf_to_purchase_receipt.pdf_to_purchase_receipt.handle_pr_after_supplier",
+						args: {
+							docname: cur_frm.doc.name,
+							supplier_name: ctx_supp.supplier_name
+						},
+						callback(r) {
+							frappe.show_alert({ message: __("Supplier synchronized."), indicator: "green" });
+							cur_frm.reload_doc();
+						}
+					});
 				}
 			}, 600);
 			return;
@@ -260,7 +318,8 @@ frappe.router.on("change", () => {
 							do_no: c.do_no,
 							item_row: JSON.stringify({ item_code: f.doc.name, qty: c.qty, uom: c.uom }),
 							supplier_name: c.supplier,
-							batch_no: c.batch || ""
+							batch_no: c.batch || "",
+							old_item_code: c.item_code
 						},
 						callback(r) {
 							frappe.set_route("Form", "PDF to Purchase Receipt", c.docname);
