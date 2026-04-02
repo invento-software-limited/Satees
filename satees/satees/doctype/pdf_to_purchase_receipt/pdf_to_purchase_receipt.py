@@ -241,7 +241,6 @@ class PDFtoPurchaseReceipt(Document):
 					pr_name = do_no
 				
 				# Identify items already in DB vs missing
-				found_items = []
 				for itm in items:
 					item_code = itm.get("item_code")
 					batch_no = itm.get("batch", "")
@@ -250,12 +249,11 @@ class PDFtoPurchaseReceipt(Document):
 					# Refined lookup: exact match first
 					if frappe.db.exists("Item", item_code):
 						itm["status"] = "Found"
-						# Auto-create Batch and UOM if present in PDF and not yet in system
+						# Ensure Match/Batch/UOM if present in PDF
 						if batch_no:
 							_ensure_batch(item_code, batch_no)
 						if uom:
 							_ensure_uom(uom)
-						found_items.append(itm)
 					# Fallback: check before "/" if not found
 					elif "/" in item_code:
 						base_code = item_code.split("/")[0].strip()
@@ -266,54 +264,15 @@ class PDFtoPurchaseReceipt(Document):
 								_ensure_batch(base_code, batch_no)
 							if uom:
 								_ensure_uom(uom)
-							found_items.append(itm)
 						else:
 							itm["status"] = "Not Found"
 					else:
 						itm["status"] = "Not Found"
 
-				# Auto-create/update PR if we have a supplier and items
-				if found_items and supplier_id:
-					if pr_name:
-						pr = frappe.get_doc("Purchase Receipt", pr_name)
-					else:
-						pr = frappe.new_doc("Purchase Receipt")
-						if do_no != "NO-DO":
-							pr.name = do_no
-						pr.supplier = supplier_id
-						pr.posting_date = self.date or datetime.today().date()
-					
-					needs_save = False
-					existing_combos = {
-						(i.item_code, i.batch_no or "") for i in pr.items
-					}
-					for f_itm in found_items:
-						combo = (f_itm.get("item_code"), f_itm.get("batch") or "")
-						if combo not in existing_combos:
-							pr.append("items", {
-								"item_code": f_itm.get("item_code"),
-								"qty": f_itm.get("qty"),
-								"uom": f_itm.get("uom"),
-								"batch_no": f_itm.get("batch") or "",
-								"schedule_date": pr.posting_date
-							})
-							needs_save = True
-					
-					if needs_save or pr.get("__islocal"):
-						if pr.get("__islocal"):
-							pr.insert(ignore_permissions=True)
-						else:
-							pr.save(ignore_permissions=True)
-						
-						pr_name = pr.name
-						
-						if not pr_to_save_on_doc:
-							pr_to_save_on_doc = pr_name
-
 				# Build result array for the UI table
 				for itm in items:
 					result.append({
-						"pr_name": pr_name,
+						"pr_name": "", # Will be filled by sync_pr
 						"do_no": do_no if do_no != "NO-DO" else "",
 						"no": itm.get("no"),
 						"item_code": itm.get("item_code"),
@@ -379,6 +338,13 @@ class PDFtoPurchaseReceipt(Document):
 
 				found_items = [i for i in items if i.get("status") == "Found"]
 				
+				# Debugging why PR might not be created
+				if not found_items or not supplier_id:
+					frappe.log_error(
+						message=f"PR skipped for DO {do_no}. Found Items: {len(found_items)}, Supplier ID: {supplier_id}",
+						title="PDF sync_pr: SKIPPED"
+					)
+
 				if found_items and supplier_id:
 					pr_name = items[0].get("pr_name")
 					
@@ -398,31 +364,63 @@ class PDFtoPurchaseReceipt(Document):
 						pr.posting_date = self.date or datetime.today().date()
 
 					needs_save = False
-					existing_combos = {
-						(i.item_code, i.uom, float(i.qty), i.batch_no or "") for i in pr.items
-					}
+					
+					# Required items from PDF
+					required_items = []
 					for f_itm in found_items:
-						item_code = f_itm.get("item_code")
-						uom = f_itm.get("uom") or ""
-						qty = float(f_itm.get("qty") or 0)
-						batch_no = f_itm.get("batch") or ""
+						required_items.append({
+							"item_code": f_itm.get("item_code"),
+							"uom": f_itm.get("uom") or "",
+							"qty": float(f_itm.get("qty") or 0),
+							"batch_no": f_itm.get("batch") or ""
+						})
+					
+					# Track which existing rows match a required item
+					current_items = pr.get("items")
+					matched_existing_indices = set()
+					final_items_data = []
+					
+					for req in required_items:
+						matched_idx = -1
+						for idx, existing in enumerate(current_items):
+							if idx in matched_existing_indices:
+								continue
+							
+							# Compare attributes
+							if (existing.item_code == req["item_code"] and 
+								existing.uom == req["uom"] and 
+								abs(float(existing.qty) - req["qty"]) < 0.001 and 
+								(existing.batch_no or "") == req["batch_no"]):
+								matched_idx = idx
+								break
 						
-						combo = (item_code, uom, qty, batch_no)
-						if combo not in existing_combos:
-							# Ensure Match/Batch/UOM
-							if batch_no:
-								_ensure_batch(item_code, batch_no)
-							if uom:
-								_ensure_uom(uom)
-
-							pr.append("items", {
-								"item_code": item_code,
-								"qty": qty,
-								"uom": uom,
-								"batch_no": batch_no,
+						if matched_idx >= 0:
+							# Keep existing row to maintain its properties
+							final_items_data.append(current_items[matched_idx])
+							matched_existing_indices.add(matched_idx)
+						else:
+							# Add new row from required data
+							if req["batch_no"]:
+								_ensure_batch(req["item_code"], req["batch_no"])
+							if req["uom"]:
+								_ensure_uom(req["uom"])
+								
+							new_row = {
+								"item_code": req["item_code"],
+								"qty": req["qty"],
+								"uom": req["uom"],
+								"batch_no": req["batch_no"],
 								"schedule_date": pr.posting_date
-							})
+							}
+							final_items_data.append(new_row)
 							needs_save = True
+
+					# If the number of items changed, we definitely need a save
+					if len(final_items_data) != len(current_items):
+						needs_save = True
+
+					if needs_save:
+						pr.set("items", final_items_data)
 
 					if needs_save or pr.get("__islocal"):
 						if pr.get("__islocal"):
