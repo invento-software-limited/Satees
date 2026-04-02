@@ -11,7 +11,8 @@
   "status",
   "posting_date",
   "section_break_eomq",
-  "item_list"
+  "item_list",
+  "pdf_data"
  ],
  "fields": [
   {
@@ -62,12 +63,18 @@
    "in_standard_filter": 1,
    "label": "Posting Date",
    "read_only": 1
+  },
+  {
+   "fieldname": "pdf_data",
+   "fieldtype": "JSON",
+   "label": "pdf_data",
+   "read_only": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-04-01 12:24:16.185164",
+ "modified": "2026-04-02 12:09:26.166749",
  "modified_by": "Administrator",
  "module": "Satees",
  "name": "PDF to Purchase Receipt",
