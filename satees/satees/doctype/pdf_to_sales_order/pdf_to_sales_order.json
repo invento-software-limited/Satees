@@ -12,7 +12,8 @@
   "status",
   "posting_date",
   "items_section",
-  "item_list"
+  "item_list",
+  "twilio_whatsapp_message_log"
  ],
  "fields": [
   {
@@ -65,12 +66,24 @@
    "in_standard_filter": 1,
    "label": "Posting Date",
    "read_only": 1
+  },
+  {
+   "fieldname": "twilio_whatsapp_message_log",
+   "fieldtype": "Link",
+   "hidden": 1,
+   "label": "Twilio Whatsapp Message Log",
+   "options": "Twilio Whatsapp Message Log"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
- "links": [],
- "modified": "2026-04-01 12:26:55.815554",
+ "links": [
+  {
+   "link_doctype": "Sales Order",
+   "link_fieldname": "custom_pdf_to_sales_order"
+  }
+ ],
+ "modified": "2026-04-04 10:29:12.323232",
  "modified_by": "Administrator",
  "module": "Satees",
  "name": "Pdf To Sales Order",
