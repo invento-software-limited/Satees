@@ -136,8 +136,13 @@
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
- "links": [],
- "modified": "2026-03-19 01:56:34.339294",
+ "links": [
+  {
+   "link_doctype": "Pdf To Sales Order",
+   "link_fieldname": "twilio_whatsapp_message_log"
+  }
+ ],
+ "modified": "2026-04-04 10:24:07.717996",
  "modified_by": "Administrator",
  "module": "Satees",
  "name": "Twilio Whatsapp Message Log",
