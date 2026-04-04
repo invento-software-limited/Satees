@@ -309,6 +309,19 @@ class PDFtoPurchaseReceipt(Document):
 						"supplier_status": "Found" if supplier_id else "Not Found"
 					})
 
+				# Append a unique suffix to each batch number.
+			# Start from -001 and increment until a batch_id that doesn't exist in DB is found.
+			for idx, row in enumerate(result):
+				raw_batch = row.get("batch") or ""
+				if raw_batch:
+					counter = idx + 1
+					while True:
+						candidate = f"{raw_batch}-{str(counter).zfill(3)}"
+						if not frappe.db.exists("Batch", {"batch_id": candidate}):
+							break
+						counter += 1
+					row["batch"] = candidate
+
 			self.pdf_data = json.dumps(result, default=str)
 			self.sync_pr()
 			return result
