@@ -40,10 +40,14 @@ frappe.ui.form.on("Pdf To Sales Order", {
                 const items = typeof frm.doc.pdf_data === "string" ? JSON.parse(frm.doc.pdf_data) : frm.doc.pdf_data;
                 if (items && items.length > 0) {
                     frm.events.render_items_table(frm, items);
+                } else if (frm.doc.pdf) {
+                    frm.get_field("item_list").$wrapper.html("<div class='alert alert-danger' style='padding: 10px; margin-bottom: 0px; color: var(--red-500, #dc3545); font-weight: bold;'>Please add a valid pdf to create Sales Order.</div>");
                 }
             } catch (e) {
                 console.error("Failed to parse pdf_data:");
             }
+        } else if (frm.doc.pdf) {
+            frm.get_field("item_list").$wrapper.html("<div class='alert alert-danger' style='padding: 10px; margin-bottom: 0px; color: var(--red-500, #dc3545); font-weight: bold;'>Please add a valid pdf to create Sales Order.</div>");
         }
 
         // ── Auto-return logic ─────────────────────────────────────────────
@@ -75,7 +79,11 @@ frappe.ui.form.on("Pdf To Sales Order", {
 
     get_items(frm) {
         frm.call({ method: "get_items", doc: frm.doc }).then((r) => {
-            if (r.message) frm.events.render_items_table(frm, r.message);
+            if (r.message && r.message.length > 0) {
+                frm.events.render_items_table(frm, r.message);
+            } else {
+                frm.get_field("item_list").$wrapper.html("<div class='alert alert-danger' style='padding: 10px; margin-bottom: 0px; color: var(--red-500, #dc3545); font-weight: bold;'>Please add a valid pdf to create Sales Order.</div>");
+            }
         });
     },
 

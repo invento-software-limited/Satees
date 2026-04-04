@@ -142,7 +142,7 @@ doc_events = {
 	# 	"on_trash": "method"
 	# }
     "Twilio Whatsapp Message Log":{
-        "before_insert": "satees.method.doc_events.twilio_whatsapp_msg_log.before_insert"
+        "after_insert": "satees.method.doc_events.twilio_whatsapp_msg_log.after_insert"
     }
 	# "Production Plan":{
 	# 	"on_submit": "satees.method.doc_events.production_plan.on_submit"

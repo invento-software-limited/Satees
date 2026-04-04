@@ -77,20 +77,43 @@ class PdfToSalesOrder(Document):
 								"items": []
 							}
 
-						# Item row? Starts with digit
-						elif current_order and str(row[0])[0].isdigit():
-							item_parts = row[0].split()
-							if len(item_parts) > 5:
-								current_order["items"].append({
-									"item_code":     item_parts[1].split('/')[0],
-									"location":      item_parts[-4],
-									"qty":           item_parts[-2],
-									"delivery_date": item_parts[-3],
-									"description":   " ".join(item_parts[2:-4])
-								})
+						# Item row? Or description continuation?
+						elif current_order:
+							row_str = str(row[0]).strip()
+							if not row_str:
+								continue
+								
+							# A cell from extract_table may contain multiple lines due to text wrapping
+							for line_str in row_str.split('\n'):
+								line_str = line_str.strip()
+								if not line_str:
+									continue
+
+								# Ignore page headers if they somehow end up in the table after an order has started
+								lower_str = line_str.lower()
+								if lower_str.startswith("seq.") or lower_str.startswith("page") or lower_str.startswith("outstanding") or lower_str.startswith("as at"):
+									continue
+
+								item_parts = line_str.split()
+								# Check if it's a new item line: begins with digit, has >5 parts, and has a date-like string
+								if line_str[0].isdigit() and len(item_parts) > 5 and re.match(r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', item_parts[-3]):
+									current_order["items"].append({
+										"item_code":     item_parts[1].split('/')[0],
+										"location":      item_parts[-4],
+										"qty":           item_parts[-2],
+										"delivery_date": item_parts[-3],
+										"description":   " ".join(item_parts[2:-4])
+									})
+								else:
+									# This is likely a continuation of the description
+									if current_order["items"]:
+										current_order["items"][-1]["description"] += " " + line_str
 
 			if current_order:
 				extracted_orders.append(current_order)
+
+			if not extracted_orders:
+				return []
 
 			return self.map_extracted_data(extracted_orders)
 
@@ -211,16 +234,21 @@ class PdfToSalesOrder(Document):
 
 				# Parse delivery date safely
 				raw_date = item.get("delivery_date", "")
+				parsed_date = ""
 				try:
 					# Handle both "dd/mm/yy" (from PDF) and "YYYY-MM-DD" (from existing JSON)
 					if isinstance(raw_date, str) and "-" in raw_date:
-						parsed_date = raw_date
-					else:
+						# try parsing as is or it might be raw string
+						parsed_date = frappe.utils.getdate(raw_date)
+					elif raw_date:
 						# Note: check if format is dd/mm/yy or dd/mm/yyyy
-						parsed_date = frappe.utils.getdate(datetime.strptime(raw_date, "%d/%m/%y"))
+						try:
+							parsed_date = frappe.utils.getdate(datetime.strptime(raw_date, "%d/%m/%y"))
+						except Exception:
+							parsed_date = frappe.utils.getdate(raw_date)
 				except Exception:
-					# Fallback for other formats
-					parsed_date = frappe.utils.getdate(raw_date) if raw_date else ""
+					# Fallback for other formats or unparseable text
+					parsed_date = ""
 
 				result.append({
 					"seq":            seq,
@@ -270,8 +298,8 @@ class PdfToSalesOrder(Document):
 
 	@frappe.whitelist()
 	def create_sales_orders(self):
-		if not self.pdf_data:
-			frappe.throw("No data to process. Please extract PDF first.")
+		if not self.pdf_data or self.pdf_data == "[]":
+			return ""
 
 		data = json.loads(self.pdf_data)
 		# Ensure all required fields are present for processing
@@ -318,6 +346,10 @@ class PdfToSalesOrder(Document):
 						so_doc.flags.name_set = True
 					is_new = True
 
+				# Link Whatsapp message log implicitly if tracking source is provided
+				if self.get("twilio_whatsapp_message_log"):
+					so_doc.twilio_whatsapp_message_log = self.twilio_whatsapp_message_log
+
 				for itm in items:
 					# Basic check to avoid redundant items if updating
 					existing_item = False
@@ -338,6 +370,7 @@ class PdfToSalesOrder(Document):
 						})
 				
 				if is_new or so_doc.has_value_changed("items"):
+					so_doc.custom_pdf_to_sales_order = self.name
 					so_doc.save(ignore_permissions=True)
 					frappe.db.commit()
 					action = "Created" if is_new else "Updated"
