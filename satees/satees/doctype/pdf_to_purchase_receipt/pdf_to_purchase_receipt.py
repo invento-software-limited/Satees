@@ -31,6 +31,21 @@ class PDFtoPurchaseReceipt(Document):
 				if do_match:
 					do_no = do_match.group()
 
+				# Extract Material Request ID (SO No. field, e.g. MAT-MR-2026-00001)
+				mr_no = ""
+				mr_match = re.search(
+					r"(?:SO|MR|Material Request)\s*No\.?\s*[:\-]?\s*(MAT-MR-\d{4}-\d+)",
+					text,
+					re.IGNORECASE
+				)
+				if mr_match:
+					mr_no = mr_match.group(1).strip()
+				else:
+					# Fallback: look for MAT-MR pattern anywhere in the text
+					mr_fallback = re.search(r"(MAT-MR-[\w-]+)", text)
+					if mr_fallback:
+						mr_no = mr_fallback.group(1).strip()
+
 				# Extract Date
 				if not getattr(self, "date", None):
 					date_match = re.search(r'(?i)Date\s*[:]\s*(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})', text)
@@ -178,6 +193,7 @@ class PDFtoPurchaseReceipt(Document):
 				if current_items:
 					extracted_receipts.append({
 						"do_no": do_no,
+						"mr_no": mr_no,
 						"supplier": supplier_raw,
 						"items": current_items
 					})
@@ -208,6 +224,7 @@ class PDFtoPurchaseReceipt(Document):
 				if do_no not in grouped_data:
 					grouped_data[do_no] = {
 						"supplier_name": rec.get("supplier", ""),
+						"mr_no": rec.get("mr_no", ""),
 						"items": []
 					}
 				grouped_data[do_no]["items"].extend(rec.get("items", []))
@@ -217,7 +234,12 @@ class PDFtoPurchaseReceipt(Document):
 
 			for do_no, data in grouped_data.items():
 				supplier_name = data["supplier_name"]
+				mr_no = data.get("mr_no", "")
 				items = data["items"]
+
+				# Set Material Request link field on the document
+				if mr_no:
+					self.material_requiest = mr_no
 
 				# Locate Supplier ID
 				supplier_id = ""
@@ -274,6 +296,7 @@ class PDFtoPurchaseReceipt(Document):
 					result.append({
 						"pr_name": "", # Will be filled by sync_pr
 						"do_no": do_no if do_no != "NO-DO" else "",
+						"material_request": mr_no,
 						"no": itm.get("no"),
 						"item_code": itm.get("item_code"),
 						"description": itm.get("description"),
@@ -428,6 +451,14 @@ class PDFtoPurchaseReceipt(Document):
 						else:
 							pr.save(ignore_permissions=True)
 						
+						# Link back to this PDF doc on the PR using db_set to bypass
+						# link validation (parent doc may not be in DB yet during before_save)
+						if self.name and not self.name.startswith("new-"):
+							try:
+								pr.db_set("custom_pdf_to_purchase_receipt", self.name, update_modified=False)
+							except Exception:
+								frappe.log_error(message=frappe.get_traceback(), title="PR: set custom_pdf_to_purchase_receipt Error")
+						
 						# Update pr_name in our internal data if it was missing
 						if not pr_to_save_on_doc:
 							pr_to_save_on_doc = pr.name
@@ -460,6 +491,8 @@ class PDFtoPurchaseReceipt(Document):
 				self.db_set("status", self.status)
 				self.db_set("pdf_data", self.pdf_data)
 				self.db_set("purchase_receipt", self.purchase_receipt)
+				if getattr(self, "material_requiest", None):
+					self.db_set("material_requiest", self.material_requiest)
 		
 		except Exception:
 			frappe.log_error(message=frappe.get_traceback(), title="PDF sync_pr Error")
