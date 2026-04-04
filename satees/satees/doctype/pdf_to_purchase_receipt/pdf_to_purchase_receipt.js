@@ -3,21 +3,36 @@
 
 frappe.ui.form.on("PDF to Purchase Receipt", {
 	refresh(frm) {
-		frm.trigger("get_items");
+		if (frm.doc.pdf_data) {
+			try {
+				const items = typeof frm.doc.pdf_data === "string" ? JSON.parse(frm.doc.pdf_data) : frm.doc.pdf_data;
+				if (items && items.length > 0) {
+					frm.events.render_items_table(frm, items);
+				} else {
+					const $wrapper = frm.get_field("item_list").$wrapper;
+					$wrapper.html(`<div style="padding:12px; color: var(--red-500);">No items found in PDF. Please check the error log.</div>`);
+				}
+			} catch (e) {
+				console.error("Failed to parse pdf_data:", e);
+			}
+		} else {
+			frm.get_field("item_list").$wrapper.empty();
+		}
 	},
 	supplier_delivery_pdf(frm) {
-		frm.trigger("get_items");
+		if (frm.doc.supplier_delivery_pdf) {
+			frm.save();
+		}
 	},
 
 	get_items(frm) {
-		
 		if (!frm.doc.supplier_delivery_pdf) return;
 
 		frappe.show_alert({ message: __("Parsing PDF..."), indicator: "blue" });
-		frm.call({ method: "get_items", doc: frm.doc }).then((r) => {
-			
+		frm.call({ method: "extract_pdf_data", doc: frm.doc }).then((r) => {
 			if (r.message && r.message.length > 0) {
 				frm.events.render_items_table(frm, r.message);
+				frm.reload_doc();
 			} else {
 				const $wrapper = frm.get_field("item_list").$wrapper;
 				$wrapper.html(`<div style="padding:12px; color: var(--red-500);">No items found in PDF. Please check the error log.</div>`);
@@ -122,6 +137,12 @@ frappe.ui.form.on("PDF to Purchase Receipt", {
 					<td style="text-align:center;">
 						<span class="status-pill ${status_class}">${__(item.status)}</span>
 						${create_btn}
+						<button class="btn btn-xs btn-default wpr-link-btn"
+							style="margin-top: 5px; display: block; width: 100%; color: var(--text-muted); border-color: var(--border-color);"
+							data-no="${item.no || ""}"
+							data-item-code="${(item.item_code || "").replace(/"/g, "&quot;")}">
+							${__("Link Item")}
+						</button>
 					</td>
 				</tr>
 			`);
@@ -173,7 +194,8 @@ frappe.ui.form.on("PDF to Purchase Receipt", {
 			const supplier_name = $btn.data("supplier");
 
 			localStorage.setItem("wpr_pending_supplier", JSON.stringify({
-				docname: frm.doc.name
+				docname: frm.doc.name,
+				supplier_name: supplier_name
 			}));
 
 			frappe.ui.form.on("Supplier", {
@@ -186,98 +208,139 @@ frappe.ui.form.on("PDF to Purchase Receipt", {
 			});
 			frappe.set_route("Form", "Supplier", "new-supplier-1");
 		});
+
+		// Handle Link Item button
+		$wrap.on("click", ".wpr-link-btn", function() {
+			const $btn = $(this);
+			const item_no = $btn.data("no");
+
+			frappe.prompt([
+				{
+					label: __("Select Existing Item"),
+					fieldname: "item_code",
+					fieldtype: "Link",
+					options: "Item",
+					reqd: 1
+				}
+			], (values) => {
+				if (frm.doc.pdf_data) {
+					try {
+						let data = JSON.parse(frm.doc.pdf_data);
+						let item_updated = false;
+						data.forEach(d => {
+							if (String(d.no) === String(item_no)) {
+								d.item_code = values.item_code;
+								d.status = "Found";
+								item_updated = true;
+							}
+						});
+						if (item_updated) {
+							frm.set_value("pdf_data", JSON.stringify(data));
+							frm.trigger("render_items_table", data);
+							
+							frappe.show_alert({ message: __("Linking item and updating Purchase Receipt..."), indicator: "blue" });
+							frm.call("sync_pr").then(() => {
+								frappe.show_alert({ message: __("Purchase Receipt synchronized."), indicator: "green" });
+								frm.reload_doc();
+							});
+						}
+					} catch(e) {
+						console.error("Failed to update item link:", e);
+					}
+				}
+			}, __("Link Item to System"), __("Link"));
+		});
 	}
 });
 
-// Router hook to handle return from Item creation
+// // Router hook to handle return from Item or Supplier creation
 frappe.router.on("change", () => {
-	const pending = localStorage.getItem("wpr_pending");
-	if (!pending) return;
-
-	let ctx;
-	try { ctx = JSON.parse(pending); } catch (e) { return; }
-
 	const route = frappe.get_route();
 	if (!route) return;
 
-	// Return to the PDF form
-	if (route[0] === "Form" && route[1] === "PDF to Purchase Receipt" && route[2] === ctx.docname) {
-		localStorage.removeItem("wpr_pending");
-		setTimeout(() => {
-			if (cur_frm && cur_frm.doctype === "PDF to Purchase Receipt") {
-				cur_frm.trigger("get_items");
-			}
-		}, 600);
-		return;
-	}
+	// Return to the PDF form from Item creation
+	const pending = localStorage.getItem("wpr_pending");
+	if (pending) {
+		let ctx;
+		try { ctx = JSON.parse(pending); } catch (e) { return; }
 
-	// When on Item form, listen for save
-	if (route[0] === "Form" && route[1] === "Item") {
-		frappe.ui.form.on("Item", {
-			after_save(f) {
-				const still = localStorage.getItem("wpr_pending");
-				if (!still) return;
-				let c;
-				try { c = JSON.parse(still); } catch (e) { return; }
-
-				localStorage.removeItem("wpr_pending");
-				frappe.show_alert({ message: __("Item created. Updating Purchase Receipt…"), indicator: "blue" });
-
-				frappe.call({
-					method: "satees.satees.doctype.pdf_to_purchase_receipt.pdf_to_purchase_receipt.handle_pr_after_item",
-					args: {
-						docname: c.docname,
-						do_no: c.do_no,
-						item_row: JSON.stringify({ item_code: f.doc.name, qty: c.qty, uom: c.uom }),
-						supplier_name: c.supplier,
-						batch_no: c.batch || ""
-					},
-					callback(r) {
-						if (r.message && r.message.status === "ok") {
-							frappe.show_alert({ message: __("Purchase Receipt updated: ") + r.message.pr_name, indicator: "green" });
-						} else if (r.message) {
-							frappe.msgprint({ title: __("Error"), indicator: "red", message: r.message.error || __("Unknown error") });
-						}
-						// Navigate back; the router change handler will detect the return
-						// to "PDF to Purchase Receipt" and call get_items to refresh.
-						frappe.set_route("Form", "PDF to Purchase Receipt", c.docname);
-					}
-				});
-			}
-		});
-	}
-
-	// Also handle return to PDF from Supplier creation
-	const pending_supplier = localStorage.getItem("wpr_pending_supplier");
-	if (pending_supplier) {
-		let ctx_supp;
-		try { ctx_supp = JSON.parse(pending_supplier); } catch (e) { }
-		if (ctx_supp && route[0] === "Form" && route[1] === "PDF to Purchase Receipt" && route[2] === ctx_supp.docname) {
-			localStorage.removeItem("wpr_pending_supplier");
+		if (route[0] === "Form" && route[1] === "PDF to Purchase Receipt" && route[2] === ctx.docname) {
+			localStorage.removeItem("wpr_pending");
 			setTimeout(() => {
 				if (cur_frm && cur_frm.doctype === "PDF to Purchase Receipt") {
-					cur_frm.trigger("get_items");
+					cur_frm.reload_doc();
 				}
 			}, 600);
 			return;
 		}
 	}
 
-	// When on Supplier form, listen for save
+	// Return to the PDF form from Supplier creation
+	const pending_supplier = localStorage.getItem("wpr_pending_supplier");
+	if (pending_supplier) {
+		let ctx_supp;
+		try { ctx_supp = JSON.parse(pending_supplier); } catch (e) { }
+
+		if (ctx_supp && route[0] === "Form" && route[1] === "PDF to Purchase Receipt" && route[2] === ctx_supp.docname) {
+			localStorage.removeItem("wpr_pending_supplier");
+			setTimeout(() => {
+				if (cur_frm && cur_frm.doctype === "PDF to Purchase Receipt") {
+					frappe.show_alert({ message: __("Updating supplier status and synchronizing..."), indicator: "blue" });
+					frappe.call({
+						method: "satees.satees.doctype.pdf_to_purchase_receipt.pdf_to_purchase_receipt.handle_pr_after_supplier",
+						args: {
+							docname: cur_frm.doc.name,
+							supplier_name: ctx_supp.supplier_name
+						},
+						callback(r) {
+							frappe.show_alert({ message: __("Supplier synchronized."), indicator: "green" });
+							cur_frm.reload_doc();
+						}
+					});
+				}
+			}, 600);
+			return;
+		}
+	}
+
+	// Attach handlers when on Item or Supplier form
+	if (route[0] === "Form" && route[1] === "Item") {
+		frappe.ui.form.on("Item", {
+			after_save(f) {
+				if (localStorage.getItem("wpr_pending")) {
+					frappe.show_alert({ message: __("Item created. Updating Purchase Receipt…"), indicator: "blue" });
+					let c = JSON.parse(localStorage.getItem("wpr_pending"));
+					
+					frappe.call({
+						method: "satees.satees.doctype.pdf_to_purchase_receipt.pdf_to_purchase_receipt.handle_pr_after_item",
+						args: {
+							docname: c.docname,
+							do_no: c.do_no,
+							item_row: JSON.stringify({ item_code: f.doc.name, qty: c.qty, uom: c.uom }),
+							supplier_name: c.supplier,
+							batch_no: c.batch || "",
+							old_item_code: c.item_code
+						},
+						callback(r) {
+							frappe.set_route("Form", "PDF to Purchase Receipt", c.docname);
+						}
+					});
+				}
+			}
+		});
+	}
+
 	if (route[0] === "Form" && route[1] === "Supplier") {
 		frappe.ui.form.on("Supplier", {
 			after_save(f) {
 				const still = localStorage.getItem("wpr_pending_supplier");
-				if (!still) return;
-				let c;
-				try { c = JSON.parse(still); } catch (e) { return; }
-
-				localStorage.removeItem("wpr_pending_supplier");
-				frappe.show_alert({ message: __("Supplier created. Returning to PDF..."), indicator: "green" });
-
-				setTimeout(() => {
-					frappe.set_route("Form", "PDF to Purchase Receipt", c.docname);
-				}, 1000);
+				if (still) {
+					let c = JSON.parse(still);
+					frappe.show_alert({ message: __("Supplier created. Returning to PDF..."), indicator: "green" });
+					setTimeout(() => {
+						frappe.set_route("Form", "PDF to Purchase Receipt", c.docname);
+					}, 800);
+				}
 			}
 		});
 	}
