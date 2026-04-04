@@ -574,6 +574,20 @@ def handle_pr_after_item(docname, do_no, item_row, supplier_name="", batch_no=""
 			if match_do and match_code and d.get("status") != "Found":
 				d["item_code"] = item_code
 				d["status"] = "Found"
+
+				# Re-generate a unique batch suffix.
+				# Strip any existing -NNN suffix first (e.g. '251231-001' → '251231').
+				raw_batch = d.get("batch") or ""
+				if raw_batch:
+					base_batch = re.sub(r"-\d{3,4}$", "", raw_batch)
+					counter = 1
+					while True:
+						candidate = f"{base_batch}-{str(counter).zfill(3)}"
+						if not frappe.db.exists("Batch", {"batch_id": candidate}):
+							break
+						counter += 1
+					d["batch"] = candidate
+
 				item_updated = True
 				break
 
