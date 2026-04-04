@@ -7,8 +7,10 @@
  "field_order": [
   "supplier_delivery_pdf",
   "date",
-  "purchase_receipt",
   "status",
+  "column_break_otvr",
+  "purchase_receipt",
+  "material_requiest",
   "posting_date",
   "section_break_eomq",
   "item_list",
@@ -69,12 +71,34 @@
    "fieldtype": "JSON",
    "label": "pdf_data",
    "read_only": 1
+  },
+  {
+   "fieldname": "material_requiest",
+   "fieldtype": "Link",
+   "label": "Material Requiest",
+   "options": "Material Request",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_otvr",
+   "fieldtype": "Column Break"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
- "links": [],
- "modified": "2026-04-02 12:09:26.166749",
+ "links": [
+  {
+   "link_doctype": "Material Request",
+   "link_fieldname": "custom_pdf_to_purchase_receipt",
+   "table_fieldname": "Material Request"
+  },
+  {
+   "link_doctype": "Purchase Receipt",
+   "link_fieldname": "custom_pdf_to_purchase_receipt",
+   "table_fieldname": "Purchase Receipt"
+  }
+ ],
+ "modified": "2026-04-04 11:45:08.250349",
  "modified_by": "Administrator",
  "module": "Satees",
  "name": "PDF to Purchase Receipt",
