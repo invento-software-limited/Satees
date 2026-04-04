@@ -10,7 +10,7 @@
   "status",
   "column_break_otvr",
   "purchase_receipt",
-  "material_requiest",
+  "material_request",
   "posting_date",
   "section_break_eomq",
   "item_list",
@@ -73,7 +73,7 @@
    "read_only": 1
   },
   {
-   "fieldname": "material_requiest",
+   "fieldname": "material_request",
    "fieldtype": "Link",
    "label": "Material Requiest",
    "options": "Material Request",

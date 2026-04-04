@@ -239,7 +239,7 @@ class PDFtoPurchaseReceipt(Document):
 
 				# Set Material Request link field on the document
 				if mr_no:
-					self.material_requiest = mr_no
+					self.material_request = mr_no
 
 				# Locate Supplier ID
 				supplier_id = ""
@@ -309,6 +309,27 @@ class PDFtoPurchaseReceipt(Document):
 						"supplier_status": "Found" if supplier_id else "Not Found"
 					})
 
+				# MR item cross-check
+				if mr_no:
+					mr_items = frappe.db.get_all(
+						"Material Request Item",
+						filters={"parent": mr_no},
+						fields=["name", "item_code"]
+					)
+					mr_lookup = {r.item_code: r.name for r in mr_items}
+					for row in result:
+						ic = row.get("item_code") or ""
+						if ic in mr_lookup:
+							row["mr_item"] = mr_lookup[ic]
+							row["mr_status"] = "Found in MR"
+						else:
+							row["mr_item"] = ""
+							row["mr_status"] = "Not in MR"
+				else:
+					for row in result:
+						row["mr_item"] = ""
+						row["mr_status"] = ""
+
 				# Append a unique suffix to each batch number.
 			# Start from -001 and increment until a batch_id that doesn't exist in DB is found.
 			for idx, row in enumerate(result):
@@ -350,6 +371,7 @@ class PDFtoPurchaseReceipt(Document):
 				if do_no not in grouped_by_do:
 					grouped_by_do[do_no] = {
 						"supplier_name": item.get("supplier"),
+						"material_request": item.get("material_request"),
 						"items": []
 					}
 				grouped_by_do[do_no]["items"].append(item)
@@ -408,7 +430,9 @@ class PDFtoPurchaseReceipt(Document):
 							"item_code": f_itm.get("item_code"),
 							"uom": f_itm.get("uom") or "",
 							"qty": float(f_itm.get("qty") or 0),
-							"batch_no": f_itm.get("batch") or ""
+							"batch_no": f_itm.get("batch") or "",
+							"material_request": f_itm.get("material_request") or data.get("material_request"),
+							"material_request_item": f_itm.get("mr_item") or "",
 						})
 					
 					# Track which existing rows match a required item
@@ -431,8 +455,15 @@ class PDFtoPurchaseReceipt(Document):
 								break
 						
 						if matched_idx >= 0:
-							# Keep existing row to maintain its properties
-							final_items_data.append(current_items[matched_idx])
+							# Keep existing row but ensures link fields are updated
+							row = current_items[matched_idx]
+							if (row.material_request != req["material_request"] or 
+								row.material_request_item != req["material_request_item"]):
+								row.material_request = req["material_request"]
+								row.material_request_item = req["material_request_item"]
+								needs_save = True
+							
+							final_items_data.append(row)
 							matched_existing_indices.add(matched_idx)
 						else:
 							# Add new row from required data
@@ -446,6 +477,8 @@ class PDFtoPurchaseReceipt(Document):
 								"qty": req["qty"],
 								"uom": req["uom"],
 								"batch_no": req["batch_no"],
+								"material_request": req["material_request"],
+								"material_request_item": req["material_request_item"],
 								"schedule_date": pr.posting_date
 							}
 							final_items_data.append(new_row)
@@ -504,8 +537,8 @@ class PDFtoPurchaseReceipt(Document):
 				self.db_set("status", self.status)
 				self.db_set("pdf_data", self.pdf_data)
 				self.db_set("purchase_receipt", self.purchase_receipt)
-				if getattr(self, "material_requiest", None):
-					self.db_set("material_requiest", self.material_requiest)
+				if getattr(self, "material_request", None):
+					self.db_set("material_request", self.material_request)
 		
 		except Exception:
 			frappe.log_error(message=frappe.get_traceback(), title="PDF sync_pr Error")
@@ -574,6 +607,24 @@ def handle_pr_after_item(docname, do_no, item_row, supplier_name="", batch_no=""
 			if match_do and match_code and d.get("status") != "Found":
 				d["item_code"] = item_code
 				d["status"] = "Found"
+
+				# Update MR linkage for the new item code
+				mr_no = d.get("material_request")
+				if mr_no:
+					mr_item = frappe.db.get_value(
+						"Material Request Item",
+						{"parent": mr_no, "item_code": item_code},
+						"name"
+					)
+					if mr_item:
+						d["mr_item"] = mr_item
+						d["mr_status"] = "Found in MR"
+					else:
+						d["mr_item"] = ""
+						d["mr_status"] = "Not in MR"
+				else:
+					d["mr_item"] = ""
+					d["mr_status"] = ""
 
 				# Re-generate a unique batch suffix.
 				# Strip any existing -NNN suffix first (e.g. '251231-001' → '251231').

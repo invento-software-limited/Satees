@@ -82,6 +82,7 @@ frappe.ui.form.on("PDF to Purchase Receipt", {
 				.status-pill { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: var(--text-xs); font-weight: 600; }
 				.status-found { color: #1a7f3c; background-color: #d4f7e3; border: 1px solid #a3e9c4; }
 				.status-missing { color: #c0392b; background-color: #fde8e8; border: 1px solid #f5c6cb; }
+				.status-not-in-mr { color: #b45309; background-color: #fef3c7; border: 1px solid #fde68a; }
 				.wpr-create-btn { margin-top: 5px; display: block; width: 100%; font-size: var(--text-xs); }
 			`;
 			document.head.appendChild(s);
@@ -102,6 +103,7 @@ frappe.ui.form.on("PDF to Purchase Receipt", {
 					<th style="width:130px;">${__("Delivery Order")}</th>
 					<th style="width:150px;">${__("Purchase Receipt")}</th>
 					<th style="width:110px; text-align:center;">${__("Status")}</th>
+					<th style="width:110px; text-align:center;">${__("MR Status")}</th>
 				</tr>
 			</thead>
 		`);
@@ -110,6 +112,13 @@ frappe.ui.form.on("PDF to Purchase Receipt", {
 		items.forEach((item) => {
 			const is_found = item.status === "Found";
 			const status_class = is_found ? "status-found" : "status-missing";
+
+			const mr_status = item.mr_status || "";
+			const mr_class = mr_status === "Not in MR" ? "status-not-in-mr" 
+						   : mr_status === "Found in MR" ? "status-found" : "";
+			const mr_pill = mr_status 
+				? `<span class="status-pill ${mr_class}">${__(mr_status)}</span>`
+				: `<span style="color:var(--text-muted)">—</span>`;
 
 			const create_btn = !is_found ? `
 				<button class="btn btn-xs btn-primary wpr-create-btn"
@@ -144,6 +153,7 @@ frappe.ui.form.on("PDF to Purchase Receipt", {
 							${__("Link Item")}
 						</button>
 					</td>
+					<td style="text-align:center;">${mr_pill}</td>
 				</tr>
 			`);
 			$tbody.append($tr);
