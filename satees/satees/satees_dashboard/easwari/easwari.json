@@ -11,6 +11,18 @@
   },
   {
    "card": "Purchase Receipts from PDF (This Month)"
+  },
+  {
+   "card": "PDF to SO Pending & Partially Process (Weekly)"
+  },
+  {
+   "card": "PDF to Sales Order Completed (Weekly)"
+  },
+  {
+   "card": "PDF to PR Pending & Partially Processed (Weekly)"
+  },
+  {
+   "card": "PDF to Purchase Receipt Completed (Weekly)"
   }
  ],
  "charts": [
@@ -30,7 +42,7 @@
  "idx": 0,
  "is_default": 1,
  "is_standard": 1,
- "modified": "2026-03-26 15:20:00.000000",
+ "modified": "2026-04-05 11:11:30.956702",
  "modified_by": "Administrator",
  "module": "Satees",
  "name": "Easwari",
