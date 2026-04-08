@@ -240,25 +240,8 @@ class PdfToSalesOrder(Document):
 		# Clear the save indicator so the user can see it updated the field
 		self.db_set("pdf_data", self.pdf_data)
 
-		status_data = {}
-		pdf_data_list = json.loads(self.pdf_data)
-		for i in pdf_data_list:
-			if i.get("status") == "Missing":
-				status_data.setdefault("Missing Items", 0)
-				status_data["Missing Items"] += 1
-			else:
-				status_data.setdefault("Found Items", 0)
-				status_data["Found Items"] += 1
+		self.status_set()  # Update status based on new data
 		
-		
-		if len(pdf_data_list)  == status_data.get("Missing Items", 0):
-			self.status = "Pending"
-		elif len(pdf_data_list)  == status_data.get("Found Items", 0):
-			self.status = "Completed"
-		else:
-			self.status = "Partially Processed"
-		
-		self.db_set("status", self.status)
 		return result
 	
 	
@@ -347,3 +330,24 @@ class PdfToSalesOrder(Document):
 		return "\n".join(summary)
 
 
+	def status_set(self):
+		status_data = {}
+		
+		pdf_data_list = json.loads(self.pdf_data)
+		for i in pdf_data_list:
+			if i.get("so_exists") and i.get("customer_found") and i.get("item_found") and i.get("location_found") and i.get("delivery_date") and i.get("qty"):
+				status_data.setdefault("Found Items", 0)
+				status_data["Found Items"] += 1
+			else:
+				status_data.setdefault("Missing Items", 0)
+				status_data["Missing Items"] += 1
+		
+		print(status_data)
+		if len(pdf_data_list)  == status_data.get("Missing Items", 0):
+			self.status = "Pending"
+		elif len(pdf_data_list)  == status_data.get("Found Items", 0):
+			self.status = "Completed"
+		else:
+			self.status = "Partially Processed"
+		
+		self.db_set("status", self.status)
